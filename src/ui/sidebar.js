@@ -1,13 +1,154 @@
+const SIDEBAR_SECTIONS = [
+  {
+    title: "Concepts",
+    items: [
+      { number: "01", label: "The Four Zones", sectionId: "the-four-zones" },
+      { number: "02", label: "Saving Changes", sectionId: "saving-changes" },
+      { number: "03", label: "Branching", sectionId: "branching" },
+      { number: "04", label: "Merging", sectionId: "merging" },
+    ],
+  },
+  {
+    title: "Remote",
+    items: [
+      { number: "05", label: "Syncing Remote", sectionId: "syncing-remote" },
+    ],
+  },
+  {
+    title: "Undo",
+    items: [
+      { number: "06", label: "Undoing Changes", sectionId: "undoing-changes" },
+      { number: "07", label: "Stashing", sectionId: "stashing" },
+    ],
+  },
+];
+
+const PLAYGROUND_ITEM = {
+  sectionId: "playground",
+  label: "Playground (free sandbox)",
+};
+
+function renderSidebarMarkup() {
+  const sectionGroups = SIDEBAR_SECTIONS.map((group) => {
+    const itemsMarkup = group.items
+      .map(
+        (item) => `
+          <button class="sidebar-nav-item" data-role="sidebar-nav-item" data-section="${item.sectionId}" type="button">
+            <span class="sidebar-nav-number">${item.number}</span>
+            <span class="sidebar-nav-label">${item.label}</span>
+          </button>
+        `,
+      )
+      .join("");
+
+    return `
+      <section class="sidebar-group" aria-label="${group.title}">
+        <h3 class="sidebar-group-title">${group.title}</h3>
+        <div class="sidebar-group-items">
+          ${itemsMarkup}
+        </div>
+      </section>
+    `;
+  }).join("");
+
+  return `
+    <div class="sidebar-shell">
+      <header class="sidebar-logo-block">
+        <h1 class="sidebar-logo">
+          Git--<span class="sidebar-logo-accent"><em>Visual</em></span>
+        </h1>
+        <p class="sidebar-tagline">Learn git by seeing it</p>
+      </header>
+
+      <nav class="sidebar-nav" aria-label="Learning navigation">
+        ${sectionGroups}
+      </nav>
+
+      <button class="sidebar-playground" data-role="sidebar-nav-item" data-section="${PLAYGROUND_ITEM.sectionId}" type="button">
+        <span class="sidebar-playground-icon">⚡</span>
+        <span class="sidebar-playground-label">${PLAYGROUND_ITEM.label}</span>
+      </button>
+    </div>
+  `;
+}
+
+function getMainContentPanel() {
+  return document.getElementById("main-content");
+}
+
+function scrollToSection(sectionId) {
+  const mainPanel = getMainContentPanel();
+  if (!mainPanel) {
+    return;
+  }
+
+  const targetEl =
+    mainPanel.querySelector(`[data-section="${sectionId}"]`) ||
+    mainPanel.querySelector(`#${sectionId}`);
+
+  if (!targetEl) {
+    return;
+  }
+
+  const panelRect = mainPanel.getBoundingClientRect();
+  const targetRect = targetEl.getBoundingClientRect();
+  const top = mainPanel.scrollTop + (targetRect.top - panelRect.top);
+
+  mainPanel.scrollTo({ top, behavior: "smooth" });
+}
+
 /**
  * Initialize sidebar UI.
- * @param {Element} containerEl
+ * @param {Element | null} [containerEl]
  * @returns {void}
  */
-export function initSidebar(containerEl) {}
+export function initSidebar(containerEl) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const resolvedContainer = containerEl ?? document.getElementById("sidebar");
+  if (!resolvedContainer) {
+    return;
+  }
+
+  resolvedContainer.innerHTML = renderSidebarMarkup();
+
+  const navItems = resolvedContainer.querySelectorAll(
+    '[data-role="sidebar-nav-item"][data-section]',
+  );
+  navItems.forEach((itemEl) => {
+    itemEl.addEventListener("click", () => {
+      const sectionId = itemEl.getAttribute("data-section");
+      if (!sectionId) {
+        return;
+      }
+
+      setActiveSection(sectionId);
+      scrollToSection(sectionId);
+    });
+  });
+
+  setActiveSection(SIDEBAR_SECTIONS[0].items[0].sectionId);
+}
 
 /**
  * Set active sidebar section.
  * @param {string} sectionId
  * @returns {void}
  */
-export function setActiveSection(sectionId) {}
+export function setActiveSection(sectionId) {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) {
+    return;
+  }
+
+  const navItems = sidebar.querySelectorAll(
+    '[data-role="sidebar-nav-item"][data-section]',
+  );
+  navItems.forEach((itemEl) => {
+    const isActive = itemEl.getAttribute("data-section") === sectionId;
+    itemEl.classList.toggle("is-active", isActive);
+    itemEl.setAttribute("aria-current", isActive ? "true" : "false");
+  });
+}
