@@ -1,32 +1,78 @@
 :root {
-  --bg-base: #080810;
+  --bg-page: #080810;
   --bg-surface: #0f0f1a;
   --bg-elevated: #181825;
   --bg-hover: #1f1f2e;
 
+  --bg-base: var(--bg-page);
+
   --color-amber: #ffb347;
-  --color-amber-dim: rgba(255, 179, 71, 0.15);
+  --color-amber-dim: rgba(255, 179, 71, 0.12);
+  --color-amber-border: rgba(255, 179, 71, 0.25);
+
   --color-green: #1fd98b;
-  --color-green-dim: rgba(31, 217, 139, 0.15);
+  --color-green-dim: rgba(31, 217, 139, 0.12);
+  --color-green-border: rgba(31, 217, 139, 0.25);
+
   --color-purple: #9b7dff;
-  --color-purple-dim: rgba(155, 125, 255, 0.15);
+  --color-purple-dim: rgba(155, 125, 255, 0.12);
+  --color-purple-border: rgba(155, 125, 255, 0.25);
+
   --color-blue: #4d9fff;
-  --color-blue-dim: rgba(77, 159, 255, 0.15);
+  --color-blue-dim: rgba(77, 159, 255, 0.12);
+  --color-blue-border: rgba(77, 159, 255, 0.25);
+
   --color-red: #ff5e7d;
-  --color-red-dim: rgba(255, 94, 125, 0.15);
+  --color-red-dim: rgba(255, 94, 125, 0.12);
+  --color-red-border: rgba(255, 94, 125, 0.25);
 
   --border-default: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
+
   --text-primary: #f0f0fa;
   --text-secondary: #8a8aa8;
   --text-muted: #4a4a65;
+  --text-inverse: #080810;
 
   --font-display: "DM Serif Display", serif;
   --font-ui: "Outfit", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
+  --font-size-2xs: 11px;
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+  --font-size-5xl: 48px;
+
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-9: 36px;
+  --space-10: 40px;
+  --space-11: 44px;
+  --space-12: 48px;
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+
+  --z-base: 0;
+  --z-overlay: 100;
+  --z-modal: 1000;
+
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
 }

@@ -54,6 +54,318 @@ function resolveCommitTarget(commits, target) {
 }
 
 /**
+ * Resolve a branch-like reference to a commit hash.
+ * Supports local branches, remote branch keys, and refs like origin/main.
+ * @param {GitState} state
+ * @param {string} refName
+ * @returns {string | null}
+ */
+function resolveBranchRefHash(state, refName) {
+  if (Object.hasOwn(state.branches, refName)) {
+    return state.branches[refName];
+  }
+
+  if (Object.hasOwn(state.remoteBranches, refName)) {
+    return state.remoteBranches[refName];
+  }
+
+  const prefix = `${state.remote.name}/`;
+  if (refName.startsWith(prefix)) {
+    const remoteBranchName = refName.slice(prefix.length);
+    if (Object.hasOwn(state.remoteBranches, remoteBranchName)) {
+      return state.remoteBranches[remoteBranchName];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Return true when candidateHash appears in targetHash ancestry.
+ * @param {Record<string, {parents?: string[]}>} commits
+ * @param {string} candidateHash
+ * @param {string} targetHash
+ * @returns {boolean}
+ */
+function isAncestor(commits, candidateHash, targetHash) {
+  if (!candidateHash || !targetHash || !Object.hasOwn(commits, targetHash)) {
+    return false;
+  }
+
+  const stack = [targetHash];
+  const visited = new Set();
+
+  while (stack.length > 0) {
+    const currentHash = stack.pop();
+    if (!currentHash || visited.has(currentHash)) {
+      continue;
+    }
+
+    if (currentHash === candidateHash) {
+      return true;
+    }
+
+    visited.add(currentHash);
+    const commit = commits[currentHash];
+    if (!commit || !Array.isArray(commit.parents)) {
+      continue;
+    }
+
+    for (const parentHash of commit.parents) {
+      if (parentHash && !visited.has(parentHash)) {
+        stack.push(parentHash);
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Apply merge updates to a mutable cloned state.
+ * @param {GitState} nextState
+ * @param {string} sourceBranchName
+ * @returns {Array<object>}
+ */
+function applyMerge(nextState, sourceBranchName) {
+  if (nextState.detached) {
+    throw new GitSimulatorError(
+      "Cannot merge while HEAD is detached.",
+      ERROR_CODES.DETACHED_HEAD_OPERATION,
+      { HEAD: nextState.HEAD },
+    );
+  }
+
+  const currentBranch = nextState.HEAD;
+  const normalizedSource = String(sourceBranchName ?? "").trim();
+  if (!normalizedSource) {
+    throw new GitSimulatorError("Source branch is required for merge.", ERROR_CODES.BRANCH_NOT_FOUND, {
+      sourceBranchName,
+    });
+  }
+
+  if (normalizedSource === currentBranch) {
+    throw new GitSimulatorError("cannot merge a branch into itself", ERROR_CODES.BRANCH_ALREADY_EXISTS, {
+      sourceBranchName: normalizedSource,
+    });
+  }
+
+  const sourceBranchHash = resolveBranchRefHash(nextState, normalizedSource);
+  if (!sourceBranchHash) {
+    throw new GitSimulatorError(`Branch not found: ${normalizedSource}`, ERROR_CODES.BRANCH_NOT_FOUND, {
+      sourceBranchName: normalizedSource,
+    });
+  }
+
+  const currentHeadHash = nextState.branches[currentBranch];
+  const now = Date.now();
+  nextState.log = [...nextState.log, { command: "merge", timestamp: now }];
+
+  if (isAncestor(nextState.commits, currentHeadHash, sourceBranchHash)) {
+    nextState.branches[currentBranch] = sourceBranchHash;
+
+    return [
+      {
+        type: HINT_TYPES.FAST_FORWARD,
+        branch: currentBranch,
+        fromHash: currentHeadHash,
+        toHash: sourceBranchHash,
+        sourceBranch: normalizedSource,
+      },
+      {
+        type: HINT_TYPES.HEAD_MOVED,
+        from: currentHeadHash,
+        to: sourceBranchHash,
+        branch: currentBranch,
+      },
+    ];
+  }
+
+  const message = `Merge branch '${normalizedSource}'`;
+  const mergeHash = createDeterministicHash(`${message}|${currentHeadHash}|${sourceBranchHash}`);
+
+  nextState.commits[mergeHash] = {
+    hash: mergeHash,
+    message,
+    parents: [currentHeadHash, sourceBranchHash],
+    branch: currentBranch,
+    timestamp: now,
+  };
+
+  nextState.branches[currentBranch] = mergeHash;
+
+  return [
+    {
+      type: HINT_TYPES.MERGE_COMMIT,
+      hash: mergeHash,
+      parents: [currentHeadHash, sourceBranchHash],
+      sourceBranch: normalizedSource,
+    },
+    {
+      type: HINT_TYPES.HEAD_MOVED,
+      from: currentHeadHash,
+      to: mergeHash,
+      branch: currentBranch,
+    },
+  ];
+}
+
+/**
+ * Apply fetch updates to a mutable cloned state.
+ * @param {GitState} nextState
+ * @param {"fetch" | "pull"} pulseDirection
+ * @returns {Array<object>}
+ */
+function applyFetch(nextState, pulseDirection) {
+  if (!nextState.remote.connected) {
+    throw new GitSimulatorError(
+      "No remote configured or remote is disconnected.",
+      ERROR_CODES.NO_REMOTE_CONFIGURED,
+    );
+  }
+
+  if (nextState.detached) {
+    throw new GitSimulatorError(
+      "Cannot fetch while HEAD is detached.",
+      ERROR_CODES.DETACHED_HEAD_OPERATION,
+      { HEAD: nextState.HEAD },
+    );
+  }
+
+  const branch = nextState.HEAD;
+  const localHash = nextState.branches[branch];
+  const currentRemoteHash = nextState.remoteBranches[branch] ?? localHash;
+
+  let fetchedHash = currentRemoteHash;
+
+  // Simulate teammates pushing one new commit only when local and remote are aligned.
+  if (currentRemoteHash === localHash) {
+    const message = "Remote: update from origin";
+    let syntheticHash = createDeterministicHash(`remote|${branch}|${currentRemoteHash}|${message}`);
+    let suffix = 1;
+
+    while (Object.hasOwn(nextState.commits, syntheticHash)) {
+      syntheticHash = createDeterministicHash(
+        `remote|${branch}|${currentRemoteHash}|${message}|${suffix}`,
+      );
+      suffix += 1;
+    }
+
+    fetchedHash = syntheticHash;
+    nextState.commits[syntheticHash] = {
+      hash: syntheticHash,
+      message,
+      parents: currentRemoteHash ? [currentRemoteHash] : [],
+      branch,
+      timestamp: Date.now(),
+    };
+    nextState.remoteBranches[branch] = syntheticHash;
+  }
+
+  const trackingRef = `${nextState.remote.name}/${branch}`;
+  nextState.trackingBranches[branch] = trackingRef;
+  nextState.log = [...nextState.log, { command: "fetch", timestamp: Date.now() }];
+
+  return [
+    {
+      type: HINT_TYPES.TRACKING_UPDATED,
+      branch,
+      newHash: fetchedHash,
+    },
+    {
+      type: HINT_TYPES.SYNC_PULSE,
+      direction: pulseDirection,
+      branch,
+      hash: fetchedHash,
+    },
+  ];
+}
+
+/**
+ * Resolve current HEAD to a commit hash.
+ * @param {GitState} state
+ * @returns {string}
+ */
+function getCurrentHeadHash(state) {
+  return state.detached ? state.HEAD : state.branches[state.HEAD];
+}
+
+/**
+ * Resolve reset target supporting raw hashes and HEAD~n refs.
+ * @param {GitState} state
+ * @param {string} target
+ * @returns {string}
+ */
+function resolveResetTargetHash(state, target) {
+  const normalizedTarget = String(target ?? "").trim();
+  if (!normalizedTarget) {
+    throw new GitSimulatorError("Invalid reset target.", ERROR_CODES.INVALID_RESET_TARGET, { target });
+  }
+
+  if (normalizedTarget.startsWith("HEAD")) {
+    const match = /^HEAD(?:~([1-5]))?$/.exec(normalizedTarget);
+    if (!match) {
+      throw new GitSimulatorError("Invalid reset target.", ERROR_CODES.INVALID_RESET_TARGET, {
+        target: normalizedTarget,
+      });
+    }
+
+    const steps = Number(match[1] ?? "0");
+    let hash = getCurrentHeadHash(state);
+
+    for (let step = 0; step < steps; step += 1) {
+      const commit = state.commits[hash];
+      const nextParent = commit?.parents?.[0];
+      if (!nextParent) {
+        throw new GitSimulatorError("Invalid reset target.", ERROR_CODES.INVALID_RESET_TARGET, {
+          target: normalizedTarget,
+        });
+      }
+      hash = nextParent;
+    }
+
+    return hash;
+  }
+
+  const resolvedHash = resolveCommitTarget(state.commits, normalizedTarget);
+  if (!resolvedHash) {
+    throw new GitSimulatorError("Invalid reset target.", ERROR_CODES.INVALID_RESET_TARGET, {
+      target: normalizedTarget,
+    });
+  }
+
+  return resolvedHash;
+}
+
+/**
+ * Re-index stash ids to keep newest entry at stash@{0}.
+ * @param {Array<{id: string, message: string, files: Array<{name: string, status: string}>, timestamp: number}>} entries
+ * @returns {Array<{id: string, message: string, files: Array<{name: string, status: string}>, timestamp: number}>}
+ */
+function reindexStashEntries(entries) {
+  return entries.map((entry, index) => ({
+    ...entry,
+    id: `stash@{${index}}`,
+  }));
+}
+
+/**
+ * Restore file entries into workingDirectory, replacing by name when needed.
+ * @param {Array<{name: string, status: string}>} workingDirectory
+ * @param {Array<{name: string, status: string}>} restoredFiles
+ * @returns {Array<{name: string, status: string}>}
+ */
+function mergeIntoWorkingDirectory(workingDirectory, restoredFiles) {
+  const byName = new Map(workingDirectory.map((file) => [file.name, file]));
+
+  for (const file of restoredFiles) {
+    byName.set(file.name, { ...file });
+  }
+
+  return [...byName.values()];
+}
+
+/**
  * Stage files.
  * @param {GitState} state
  * @param {string[]} fileArgs
@@ -423,113 +735,436 @@ export function switchBranch(state, branchName) {
 }
 
 /**
- * Merge into current branch.
+ * Merge a source branch or remote-tracking ref into the current branch.
  * @param {GitState} state
- * @param {...unknown} args
+ * @param {string} sourceBranchName
  * @returns {CommandResult}
  */
-export function merge(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function merge(state, sourceBranchName) {
+  const nextState = cloneState(state);
+
+  try {
+    const hints = applyMerge(nextState, sourceBranchName);
+    return buildResult({ prevState: state, nextState, hints });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown merge error"),
+    });
+  }
 }
 
 /**
- * Push changes to remote.
+ * Push current branch tip to remote.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function push(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function push(state) {
+  const nextState = cloneState(state);
+
+  try {
+    if (!nextState.remote.connected) {
+      throw new GitSimulatorError(
+        "No remote configured or remote is disconnected.",
+        ERROR_CODES.NO_REMOTE_CONFIGURED,
+      );
+    }
+
+    if (nextState.detached) {
+      throw new GitSimulatorError(
+        "Cannot push while HEAD is detached.",
+        ERROR_CODES.DETACHED_HEAD_OPERATION,
+        { HEAD: nextState.HEAD },
+      );
+    }
+
+    const branch = nextState.HEAD;
+    const localHash = nextState.branches[branch];
+    const prevRemoteHash = nextState.remoteBranches[branch] ?? null;
+
+    nextState.remoteBranches[branch] = localHash;
+    nextState.log = [...nextState.log, { command: "push", timestamp: Date.now() }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [
+        {
+          type: HINT_TYPES.REMOTE_UPDATED,
+          branch,
+          fromHash: prevRemoteHash,
+          toHash: localHash,
+        },
+        {
+          type: HINT_TYPES.SYNC_PULSE,
+          direction: "push",
+          branch,
+          hash: localHash,
+        },
+      ],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown push error"),
+    });
+  }
 }
 
 /**
- * Fetch changes from remote.
+ * Fetch remote updates into tracking refs.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function fetch(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function fetch(state) {
+  const nextState = cloneState(state);
+
+  try {
+    const hints = applyFetch(nextState, "fetch");
+    return buildResult({ prevState: state, nextState, hints });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown fetch error"),
+    });
+  }
 }
 
 /**
- * Pull changes from remote.
+ * Pull by fetching remote updates and merging the tracking branch.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function pull(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function pull(state) {
+  const nextState = cloneState(state);
+
+  try {
+    const fetchHints = applyFetch(nextState, "pull");
+    const currentBranch = nextState.HEAD;
+    const trackingRef = nextState.trackingBranches[currentBranch];
+
+    const mergeHints = applyMerge(nextState, trackingRef);
+    nextState.log = [...nextState.log, { command: "pull", timestamp: Date.now() }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [...fetchHints, ...mergeHints],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown pull error"),
+    });
+  }
 }
 
 /**
  * Reset current branch.
  * @param {GitState} state
- * @param {...unknown} args
+ * @param {"soft" | "mixed" | "hard" | undefined} mode
+ * @param {string | undefined} target
  * @returns {CommandResult}
  */
-export function reset(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function reset(state, mode, target) {
+  const nextState = cloneState(state);
+
+  try {
+    if (nextState.detached) {
+      throw new GitSimulatorError(
+        "Cannot reset while HEAD is detached.",
+        ERROR_CODES.DETACHED_HEAD_OPERATION,
+        { HEAD: nextState.HEAD },
+      );
+    }
+
+    const normalizedMode = mode ?? "mixed";
+    const allowedModes = new Set(["soft", "mixed", "hard"]);
+    if (!allowedModes.has(normalizedMode)) {
+      throw new GitSimulatorError("Invalid reset mode.", ERROR_CODES.INVALID_RESET_TARGET, { mode });
+    }
+
+    const targetHash = resolveResetTargetHash(nextState, target ?? "HEAD");
+    const currentBranch = nextState.HEAD;
+    const prevHeadHash = nextState.branches[currentBranch];
+
+    nextState.branches[currentBranch] = targetHash;
+    nextState.HEAD = currentBranch;
+    nextState.log = [...nextState.log, { command: "reset", timestamp: Date.now() }];
+
+    /** @type {Array<object>} */
+    const hints = [];
+
+    if (normalizedMode === "soft") {
+      hints.push({
+        type: HINT_TYPES.RESET_PERFORMED,
+        mode: "soft",
+        targetHash,
+        affectedZones: ["commits"],
+      });
+    } else if (normalizedMode === "mixed") {
+      const filesReturned = nextState.stagingArea.map((file) => file.name);
+      const returnedAsModified = nextState.stagingArea.map((file) => ({
+        name: file.name,
+        status: "modified",
+      }));
+
+      nextState.workingDirectory = mergeIntoWorkingDirectory(
+        nextState.workingDirectory,
+        returnedAsModified,
+      );
+      nextState.stagingArea = [];
+
+      hints.push({
+        type: HINT_TYPES.RESET_PERFORMED,
+        mode: "mixed",
+        targetHash,
+        affectedZones: ["commits", "stagingArea"],
+        filesReturned,
+      });
+    } else {
+      nextState.stagingArea = [];
+      nextState.workingDirectory = [];
+
+      hints.push({
+        type: HINT_TYPES.RESET_PERFORMED,
+        mode: "hard",
+        targetHash,
+        affectedZones: ["commits", "stagingArea", "workingDirectory"],
+      });
+      hints.push({ type: HINT_TYPES.ZONE_UPDATED, zone: "stagingArea" });
+      hints.push({ type: HINT_TYPES.ZONE_UPDATED, zone: "workingDirectory" });
+    }
+
+    hints.push({
+      type: HINT_TYPES.HEAD_MOVED,
+      from: prevHeadHash,
+      to: targetHash,
+      branch: currentBranch,
+    });
+
+    return buildResult({ prevState: state, nextState, hints });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown reset error"),
+    });
+  }
 }
 
 /**
  * Revert a commit.
  * @param {GitState} state
- * @param {...unknown} args
+ * @param {string} targetHash
  * @returns {CommandResult}
  */
-export function revert(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function revert(state, targetHash) {
+  const nextState = cloneState(state);
+
+  try {
+    if (nextState.detached) {
+      throw new GitSimulatorError(
+        "Cannot revert while HEAD is detached.",
+        ERROR_CODES.DETACHED_HEAD_OPERATION,
+        { HEAD: nextState.HEAD },
+      );
+    }
+
+    const resolvedHash = resolveCommitTarget(nextState.commits, String(targetHash ?? "").trim());
+    if (!resolvedHash || !nextState.commits[resolvedHash]) {
+      throw new GitSimulatorError(`Commit not found: ${targetHash}`, ERROR_CODES.BRANCH_NOT_FOUND, {
+        targetHash,
+      });
+    }
+
+    const originalCommit = nextState.commits[resolvedHash];
+    const currentBranch = nextState.HEAD;
+    const currentHeadHash = nextState.branches[currentBranch];
+    const message = `Revert "${originalCommit.message}"`;
+    const newHash = createDeterministicHash(`${message}|${currentHeadHash}`);
+    const timestamp = Date.now();
+
+    nextState.commits[newHash] = {
+      hash: newHash,
+      message,
+      parents: [currentHeadHash],
+      branch: currentBranch,
+      timestamp,
+    };
+
+    nextState.branches[currentBranch] = newHash;
+    nextState.log = [...nextState.log, { command: "revert", timestamp }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [
+        {
+          type: HINT_TYPES.REVERT_COMMIT,
+          newHash,
+          revertedHash: resolvedHash,
+          message,
+        },
+        {
+          type: HINT_TYPES.COMMIT_CREATED,
+          hash: newHash,
+          message,
+          parentHash: currentHeadHash,
+        },
+        {
+          type: HINT_TYPES.HEAD_MOVED,
+          from: currentHeadHash,
+          to: newHash,
+          branch: currentBranch,
+        },
+      ],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown revert error"),
+    });
+  }
 }
 
 /**
  * Stash local changes.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function stash(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function stash(state) {
+  const nextState = cloneState(state);
+
+  try {
+    if (nextState.workingDirectory.length === 0 && nextState.stagingArea.length === 0) {
+      throw new GitSimulatorError("Nothing to stash.", ERROR_CODES.NOTHING_TO_STASH);
+    }
+
+    const headHash = getCurrentHeadHash(nextState);
+    const latestCommitMessage = nextState.commits[headHash]?.message ?? "No message";
+    const shortHash = (headHash ?? "").slice(0, 7);
+    const files = [...nextState.stagingArea, ...nextState.workingDirectory].map((file) => ({ ...file }));
+    const stashId = `stash@{${nextState.stash.length}}`;
+
+    const newEntry = {
+      id: stashId,
+      message: `WIP on ${nextState.HEAD}: ${shortHash} ${latestCommitMessage}`,
+      files,
+      timestamp: Date.now(),
+    };
+
+    nextState.stash = [newEntry, ...nextState.stash];
+    nextState.workingDirectory = [];
+    nextState.stagingArea = [];
+    nextState.log = [...nextState.log, { command: "stash", timestamp: Date.now() }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [
+        { type: HINT_TYPES.STASH_PUSHED, stashId, fileCount: files.length },
+        { type: HINT_TYPES.ZONE_UPDATED, zone: "workingDirectory" },
+        { type: HINT_TYPES.ZONE_UPDATED, zone: "stagingArea" },
+      ],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown stash error"),
+    });
+  }
 }
 
 /**
  * Pop latest stash entry.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function stashPop(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function stashPop(state) {
+  const nextState = cloneState(state);
+
+  try {
+    if (nextState.stash.length === 0) {
+      throw new GitSimulatorError("Nothing to stash.", ERROR_CODES.NOTHING_TO_STASH);
+    }
+
+    const [entry, ...remaining] = nextState.stash;
+    const restoredFiles = entry.files.map((file) => ({ ...file }));
+    const restoredNames = restoredFiles.map((file) => file.name);
+
+    nextState.workingDirectory = mergeIntoWorkingDirectory(nextState.workingDirectory, restoredFiles);
+    nextState.stash = reindexStashEntries(remaining);
+    nextState.log = [...nextState.log, { command: "stash pop", timestamp: Date.now() }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [
+        { type: HINT_TYPES.STASH_POPPED, stashId: entry.id },
+        { type: HINT_TYPES.FILES_RESTORED, files: restoredNames, to: "workingDirectory" },
+        { type: HINT_TYPES.ZONE_UPDATED, zone: "workingDirectory" },
+      ],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown stashPop error"),
+    });
+  }
 }
 
 /**
  * Apply stash entry.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function stashApply(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function stashApply(state) {
+  const nextState = cloneState(state);
+
+  try {
+    if (nextState.stash.length === 0) {
+      throw new GitSimulatorError("Nothing to stash.", ERROR_CODES.NOTHING_TO_STASH);
+    }
+
+    const entry = nextState.stash[0];
+    const restoredFiles = entry.files.map((file) => ({ ...file }));
+    const restoredNames = restoredFiles.map((file) => file.name);
+
+    nextState.workingDirectory = mergeIntoWorkingDirectory(nextState.workingDirectory, restoredFiles);
+    nextState.log = [...nextState.log, { command: "stash apply", timestamp: Date.now() }];
+
+    return buildResult({
+      prevState: state,
+      nextState,
+      hints: [
+        { type: HINT_TYPES.STASH_APPLIED, stashId: entry.id },
+        { type: HINT_TYPES.FILES_RESTORED, files: restoredNames, to: "workingDirectory" },
+      ],
+    });
+  } catch (error) {
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error: error instanceof Error ? error : new Error("Unknown stashApply error"),
+    });
+  }
 }
 
 /**
  * List stash entries.
  * @param {GitState} state
- * @param {...unknown} args
  * @returns {CommandResult}
  */
-export function stashList(state, ...args) {
-  void args;
-  return buildResult({ prevState: state, nextState: state });
+export function stashList(state) {
+  return buildResult({ prevState: state, nextState: state, hints: [] });
 }
 
 /**

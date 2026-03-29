@@ -5,14 +5,73 @@
 }
 
 html,
-body {
+body,
+#app {
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
 }
 
+html,
 body {
-  background: var(--bg-base);
+  overflow: hidden;
+}
+
+body {
+  min-height: 100dvh;
+  background: var(--bg-page);
   color: var(--text-primary);
   font-family: var(--font-ui);
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: var(--font-display);
+  color: inherit;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-green-dim);
+  color: var(--color-green);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-hover) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: var(--radius-xl);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-elevated);
 }
