@@ -55,7 +55,7 @@ function renderSidebarMarkup() {
     <div class="sidebar-shell">
       <header class="sidebar-logo-block">
         <h1 class="sidebar-logo">
-          Git--<span class="sidebar-logo-accent"><em>Visual</em></span>
+          Git<span class="sidebar-logo-accent"><em>Visual</em></span>
         </h1>
         <p class="sidebar-tagline">Learn git by seeing it</p>
       </header>

@@ -149,3 +149,199 @@
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
+
+.zones-section {
+  padding: var(--space-5);
+}
+
+.zones-section-header {
+  margin-bottom: var(--space-4);
+}
+
+.zones-title {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  color: var(--text-primary);
+}
+
+.zones-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.zone-column {
+  min-height: 340px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.zone-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.zone-icon {
+  font-size: var(--font-size-sm);
+}
+
+.zone-name {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.zone-body {
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.zone-working {
+  border-color: var(--color-amber-border);
+  background: linear-gradient(180deg, var(--color-amber-dim), var(--bg-surface));
+}
+
+.zone-working .zone-header {
+  border-bottom-color: var(--color-amber-border);
+}
+
+.zone-working .zone-name {
+  color: var(--color-amber);
+}
+
+.zone-staging {
+  border-color: var(--color-green-border);
+  background: linear-gradient(180deg, var(--color-green-dim), var(--bg-surface));
+}
+
+.zone-staging .zone-header {
+  border-bottom-color: var(--color-green-border);
+}
+
+.zone-staging .zone-name {
+  color: var(--color-green);
+}
+
+.zone-local {
+  border-color: var(--color-purple-border);
+  background: linear-gradient(180deg, var(--color-purple-dim), var(--bg-surface));
+}
+
+.zone-local .zone-header {
+  border-bottom-color: var(--color-purple-border);
+}
+
+.zone-local .zone-name {
+  color: var(--color-purple);
+}
+
+.zone-remote {
+  border-color: var(--color-blue-border);
+  background: linear-gradient(180deg, var(--color-blue-dim), var(--bg-surface));
+}
+
+.zone-remote .zone-header {
+  border-bottom-color: var(--color-blue-border);
+}
+
+.zone-remote .zone-name {
+  color: var(--color-blue);
+}
+
+.zone-file-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-2) var(--space-3);
+}
+
+.zone-working .zone-file-card {
+  border-color: var(--color-amber-border);
+}
+
+.zone-staging .zone-file-card {
+  border-color: var(--color-green-border);
+  background: var(--color-green-dim);
+}
+
+.file-card-name {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+.file-card-status {
+  border-radius: var(--radius-xl);
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.status-modified {
+  background: var(--color-amber-dim);
+  color: var(--color-amber);
+}
+
+.status-untracked {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.zone-body.is-empty {
+  border: 1px dashed var(--color-green-border);
+  border-radius: var(--radius-md);
+}
+
+.zone-placeholder {
+  margin: 0;
+  align-self: center;
+  justify-self: center;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.zone-metrics {
+  gap: var(--space-3);
+}
+
+.zone-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: var(--space-2) var(--space-3);
+}
+
+.zone-metric-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.zone-metric-value {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.zone-mono {
+  font-family: var(--font-mono);
+}

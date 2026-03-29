@@ -1,0 +1,149 @@
+.terminal-shell {
+  margin: var(--space-5);
+  margin-top: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  overflow: hidden;
+  min-height: 300px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+}
+
+.terminal-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.terminal-dot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-red {
+  background: var(--color-red);
+}
+
+.dot-yellow {
+  background: var(--color-amber);
+}
+
+.dot-green {
+  background: var(--color-green);
+}
+
+.terminal-path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.terminal-output {
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.terminal-line {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.terminal-line-command {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.terminal-command-prompt {
+  color: var(--color-green);
+}
+
+.terminal-command-text {
+  color: var(--text-primary);
+}
+
+.terminal-line-success {
+  color: var(--color-green);
+}
+
+.terminal-line-error {
+  color: var(--color-red);
+}
+
+.terminal-line-info {
+  color: var(--text-secondary);
+}
+
+.terminal-line-hint {
+  color: var(--color-amber);
+}
+
+.terminal-input-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+}
+
+.terminal-prefix {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.terminal-caret {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-green);
+}
+
+.terminal-input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  caret-color: var(--color-green);
+}
+
+.terminal-input::placeholder {
+  color: var(--text-muted);
+}
+
+.terminal-input-row:focus-within .terminal-caret {
+  animation: terminal-cursor-blink 1s steps(1, end) infinite;
+}
+
+@keyframes terminal-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0.3;
+  }
+}

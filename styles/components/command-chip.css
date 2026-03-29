@@ -1,0 +1,130 @@
+#main-content {
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+}
+
+.lesson-section {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: var(--space-4);
+}
+
+.lesson-header {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.lesson-number {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.lesson-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-3xl);
+  color: var(--text-primary);
+}
+
+.lesson-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.lesson-copy {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.command-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.command-chip {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-base) ease,
+    background-color var(--duration-base) ease,
+    border-color var(--duration-base) ease;
+}
+
+.command-chip:hover {
+  transform: translateY(calc(var(--space-1) / -4));
+}
+
+.chip-tone-staging {
+  background: linear-gradient(120deg, var(--color-amber-dim), var(--color-green-dim));
+  border-color: var(--color-green-border);
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-green-dim);
+}
+
+.chip-tone-staging:hover {
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-green-border), 0 0 var(--space-4) var(--color-green-dim);
+}
+
+.chip-tone-history {
+  background: var(--color-purple-dim);
+  border-color: var(--color-purple-border);
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-purple-dim);
+}
+
+.chip-tone-history:hover {
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-purple-border), 0 0 var(--space-4) var(--color-purple-dim);
+}
+
+.chip-tone-remote {
+  background: var(--color-blue-dim);
+  border-color: var(--color-blue-border);
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-blue-dim);
+}
+
+.chip-tone-remote:hover {
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-blue-border), 0 0 var(--space-4) var(--color-blue-dim);
+}
+
+.chip-tone-destructive {
+  background: var(--color-red-dim);
+  border-color: var(--color-red-border);
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-red-dim);
+}
+
+.chip-tone-destructive:hover {
+  box-shadow: 0 0 0 calc(var(--space-1) / 4) var(--color-red-border), 0 0 var(--space-4) var(--color-red-dim);
+}
+
+.lesson-demo {
+  min-height: 200px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.lesson-demo-placeholder {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
