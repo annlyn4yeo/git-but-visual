@@ -1,0 +1,32 @@
+:root {
+  --bg-base: #080810;
+  --bg-surface: #0f0f1a;
+  --bg-elevated: #181825;
+  --bg-hover: #1f1f2e;
+
+  --color-amber: #ffb347;
+  --color-amber-dim: rgba(255, 179, 71, 0.15);
+  --color-green: #1fd98b;
+  --color-green-dim: rgba(31, 217, 139, 0.15);
+  --color-purple: #9b7dff;
+  --color-purple-dim: rgba(155, 125, 255, 0.15);
+  --color-blue: #4d9fff;
+  --color-blue-dim: rgba(77, 159, 255, 0.15);
+  --color-red: #ff5e7d;
+  --color-red-dim: rgba(255, 94, 125, 0.15);
+
+  --border-default: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #f0f0fa;
+  --text-secondary: #8a8aa8;
+  --text-muted: #4a4a65;
+
+  --font-display: "DM Serif Display", serif;
+  --font-ui: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
