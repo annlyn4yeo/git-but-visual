@@ -31,11 +31,20 @@ export { createInitialState } from "./state.js";
 export function runCommand(state, rawInput) {
   const parsed = parseCommand(rawInput);
 
-  if (!parsed || "message" in parsed) {
-    const error = new GitSimulatorError(parsed?.message ?? "Unable to parse command.", "PARSE_ERROR", {
-      rawInput,
+  if (!parsed.ok) {
+    const error = new GitSimulatorError(
+      parsed.reason ?? "Unable to parse command.",
+      "PARSE_ERROR",
+      {
+        rawInput,
+      },
+    );
+    return buildResult({
+      prevState: state,
+      nextState: state,
+      error,
+      hints: [],
     });
-    return buildResult({ prevState: state, nextState: state, error, hints: [] });
   }
 
   const { command, args, flags } = parsed;
@@ -43,8 +52,10 @@ export function runCommand(state, rawInput) {
   switch (command) {
     case "add":
       return add(state, args);
-    case "commit":
-      return commit(state, args.join(" "));
+    case "commit": {
+      const message = typeof flags.m === "string" ? flags.m : args.join(" ");
+      return commit(state, message);
+    }
     case "branch":
       return createBranch(state, args[0]);
     case "checkout":
@@ -84,24 +95,30 @@ export function runCommand(state, rawInput) {
     case "revert":
       return revert(state, args[0]);
     case "stash":
-      if (args[0] === "pop") {
-        return stashPop(state);
-      }
-      if (args[0] === "apply") {
-        return stashApply(state);
-      }
-      if (args[0] === "list") {
-        return stashList(state);
-      }
       return stash(state);
+    case "stash:pop":
+      return stashPop(state);
+    case "stash:apply":
+      return stashApply(state);
+    case "stash:list":
+      return stashList(state);
     case "clone":
       return clone(state, ...args);
     default: {
-      const error = new GitSimulatorError(`Unknown command: ${command}`, "UNKNOWN_COMMAND", {
-        command,
-        rawInput,
+      const error = new GitSimulatorError(
+        `Unknown command: ${command}`,
+        "UNKNOWN_COMMAND",
+        {
+          command,
+          rawInput,
+        },
+      );
+      return buildResult({
+        prevState: state,
+        nextState: state,
+        error,
+        hints: [],
       });
-      return buildResult({ prevState: state, nextState: state, error, hints: [] });
     }
   }
 }

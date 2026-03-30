@@ -1,7 +1,6 @@
 import { emit } from "../utils/events.js";
-import { parseCommand } from "./parser.js";
 
-/** @type {null | { print: (text: string, type?: string) => void, printCommand: (input: string) => void, clear: () => void, focus: () => void }} */
+/** @type {null | { print: (text: string, type?: string) => void, printCommand: (input: string) => void, clear: () => void, focus: () => void, fillInput: (value: string) => void }} */
 let terminalApi = null;
 
 /** @type {string[]} */
@@ -37,7 +36,8 @@ function createOutputLine(text, type) {
  *   print: (text: string, type?: string) => void,
  *   printCommand: (input: string) => void,
  *   clear: () => void,
- *   focus: () => void
+ *   focus: () => void,
+ *   fillInput: (value: string) => void
  * }}
  */
 export function initTerminal(containerEl) {
@@ -47,6 +47,7 @@ export function initTerminal(containerEl) {
       printCommand() {},
       clear() {},
       focus() {},
+      fillInput() {},
     };
   }
 
@@ -72,7 +73,7 @@ export function initTerminal(containerEl) {
     <div class="terminal-output" data-role="terminal-output"></div>
     <div class="terminal-input-row">
       <span class="terminal-prefix">git</span>
-      <span class="terminal-caret" aria-hidden="true">?</span>
+      <span class="terminal-caret" aria-hidden="true">❯</span>
       <input class="terminal-input" data-role="terminal-input" type="text" spellcheck="false" autocomplete="off" />
     </div>
   `;
@@ -108,6 +109,17 @@ export function initTerminal(containerEl) {
     focus() {
       inputEl.focus();
     },
+
+    /**
+     * @param {string} value
+     */
+    fillInput(value) {
+      inputEl.value = String(value ?? "");
+      api.focus();
+      requestAnimationFrame(() => {
+        inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+      });
+    },
   };
 
   inputEl.addEventListener("keydown", (event) => {
@@ -126,15 +138,7 @@ export function initTerminal(containerEl) {
       }
       historyIndex = commandHistory.length;
 
-      const parsed = parseCommand(raw);
-      emit("command:submit", {
-        rawInput: raw,
-        parsed,
-      });
-
-      if ("message" in parsed) {
-        api.print(parsed.message, "error");
-      }
+      emit("command:submit", raw);
 
       inputEl.value = "";
       api.focus();
