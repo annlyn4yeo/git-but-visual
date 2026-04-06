@@ -3,12 +3,14 @@ import { initTerminal } from "../terminal/index.js";
 import { createInitialState, runCommand } from "../simulator/index.js";
 import { emit, on, off } from "../utils/events.js";
 import { initZones, renderZones } from "./zones.js";
-import { renderCommitGraph } from "./commit-graph.js";
 
 /** @type {Map<string, {el: HTMLElement, demoEl: HTMLElement}>} */
 const sectionRefs = new Map();
 /** @type {Map<string, {reset: () => void, dispose: () => void}>} */
 const demoControllers = new Map();
+/** @type {Map<string, number>} */
+const nudgeTimeouts = new Map();
+const COMPLETION_STORAGE_KEY = "gitvisual:section-completions:v1";
 
 const SECTIONS = [
   {
@@ -57,51 +59,40 @@ const SECTIONS = [
   },
   {
     id: "syncing-remote",
-    layout: "interactive",
+    layout: "split-sync-world",
     number: "05",
     heading: "Syncing with Remote",
     copy: [
       "Fetch is always safe and updates your view of remote refs.",
       "Pull is fetch plus merge, so it changes your local branch too.",
     ],
-    chips: [
-      { command: "git fetch", tone: "remote" },
-      { command: "git pull", tone: "remote" },
-      { command: "git push", tone: "remote" },
-    ],
+    chips: [],
   },
   {
     id: "undoing-changes",
-    layout: "interactive",
+    layout: "timeline-undo",
     number: "06",
     heading: "Undoing Changes",
     copy: [
       "Reset rewrites pointers and can discard local state if used hard.",
       "Revert is history-safe for shared branches because it adds a new commit.",
     ],
-    chips: [
-      { command: "git reset", tone: "destructive" },
-      { command: "git revert", tone: "history" },
-    ],
+    chips: [],
   },
   {
     id: "stashing",
-    layout: "interactive",
+    layout: "stash-shelf",
     number: "07",
     heading: "Stashing",
     copy: [
       "Stash acts like a clipboard for incomplete work.",
       "Save in-progress changes, switch context, then apply or pop later.",
     ],
-    chips: [
-      { command: "git stash", tone: "staging" },
-      { command: "git stash pop", tone: "staging" },
-      { command: "git stash apply", tone: "staging" },
-    ],
+    chips: [],
   },
   {
     id: "playground",
-    layout: "interactive",
+    layout: "workspace-playground",
     number: "08",
     heading: "Playground",
     copy: ["A blank repo. Type any command. Watch what happens."],
@@ -120,6 +111,146 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+/**
+ * @param {string} rawInput
+ * @param {string} scopeLabel
+ * @returns {string}
+ */
+function scopeRedirectMessage(rawInput, scopeLabel) {
+  const normalized = String(rawInput ?? "").trim() || "That command";
+  return `${normalized} isn't part of ${scopeLabel} yet. Try it in the Playground.`;
+}
+
+/**
+ * @returns {Set<string>}
+ */
+function readCompletionSet() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return new Set();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(COMPLETION_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((item) => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * @param {Set<string>} completionSet
+ * @returns {void}
+ */
+function writeCompletionSet(completionSet) {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(COMPLETION_STORAGE_KEY, JSON.stringify([...completionSet]));
+  } catch {
+    // Ignore storage write failures.
+  }
+}
+
+/**
+ * @param {string} sectionId
+ * @returns {boolean}
+ */
+function isSectionCompleted(sectionId) {
+  return readCompletionSet().has(sectionId);
+}
+
+/**
+ * @param {string} sectionId
+ * @returns {boolean}
+ */
+function markSectionCompleted(sectionId) {
+  if (!sectionId || sectionId === "playground") {
+    return false;
+  }
+
+  const completionSet = readCompletionSet();
+  if (completionSet.has(sectionId)) {
+    return false;
+  }
+
+  completionSet.add(sectionId);
+  writeCompletionSet(completionSet);
+  emit("section:completed", { sectionId });
+  return true;
+}
+
+/**
+ * @param {string} sectionId
+ * @returns {void}
+ */
+function showSectionNudge(sectionId) {
+  const refs = sectionRefs.get(sectionId);
+  if (!refs) {
+    return;
+  }
+
+  const sectionIndex = SECTIONS.findIndex((item) => item.id === sectionId);
+  const nextSection = sectionIndex >= 0 ? SECTIONS[sectionIndex + 1] : null;
+  if (!nextSection) {
+    return;
+  }
+
+  const oldNudge = refs.demoEl.querySelector('[data-role="section-nudge"]');
+  if (oldNudge) {
+    oldNudge.remove();
+  }
+
+  const nudge = document.createElement("p");
+  nudge.className = "section-next-nudge";
+  nudge.setAttribute("data-role", "section-nudge");
+  nudge.textContent = `Core idea unlocked. Continue to ${nextSection.number}: ${nextSection.heading}.`;
+  refs.demoEl.appendChild(nudge);
+
+  const removeNudge = () => {
+    if (nudge.isConnected) {
+      nudge.remove();
+    }
+  };
+
+  const oldTimeout = nudgeTimeouts.get(sectionId);
+  if (oldTimeout) {
+    window.clearTimeout(oldTimeout);
+  }
+  const timeoutId = window.setTimeout(() => {
+    removeNudge();
+    nudgeTimeouts.delete(sectionId);
+  }, 4600);
+  nudgeTimeouts.set(sectionId, timeoutId);
+
+  const mainPanel = document.getElementById("main-content");
+  if (mainPanel) {
+    const onScroll = () => {
+      removeNudge();
+      mainPanel.removeEventListener("scroll", onScroll);
+    };
+    mainPanel.addEventListener("scroll", onScroll, { passive: true });
+  }
+}
+
+/**
+ * @param {string} sectionId
+ * @returns {void}
+ */
+function acknowledgeSectionCompletion(sectionId) {
+  const isNew = markSectionCompleted(sectionId);
+  if (isNew) {
+    showSectionNudge(sectionId);
+  }
 }
 
 /**
@@ -264,6 +395,46 @@ function mountOrientationSection(sectionId) {
       </div>
     </div>
   `;
+
+  const visitedZones = new Set();
+  let completionDone = isSectionCompleted(sectionId);
+  const zoneEls = demoEl.querySelectorAll(".orientation-zone[data-zone]");
+
+  /**
+   * @param {Event} event
+   * @returns {void}
+   */
+  const handleZoneSeen = (event) => {
+    const zoneEl = /** @type {HTMLElement | null} */ (event.currentTarget instanceof HTMLElement ? event.currentTarget : null);
+    if (!zoneEl) {
+      return;
+    }
+    const zoneName = zoneEl.getAttribute("data-zone");
+    if (!zoneName) {
+      return;
+    }
+
+    visitedZones.add(zoneName);
+    if (!completionDone && visitedZones.size >= 4) {
+      acknowledgeSectionCompletion(sectionId);
+      completionDone = true;
+    }
+  };
+
+  zoneEls.forEach((zoneEl) => {
+    zoneEl.addEventListener("mouseenter", handleZoneSeen);
+    zoneEl.addEventListener("focusin", handleZoneSeen);
+  });
+
+  demoControllers.set(sectionId, {
+    reset() {},
+    dispose() {
+      zoneEls.forEach((zoneEl) => {
+        zoneEl.removeEventListener("mouseenter", handleZoneSeen);
+        zoneEl.removeEventListener("focusin", handleZoneSeen);
+      });
+    },
+  });
 }
 
 const GUIDED_SAVE_STEPS = [
@@ -334,6 +505,7 @@ function mountGuidedSaveWorkflow(sectionId) {
 
   let currentStepIndex = 0;
   let state = createInitialState();
+  let completionDone = isSectionCompleted(sectionId);
   const zonesRoot = initZones(zonesMount, { title: "Zone Diagram" });
 
   /**
@@ -383,6 +555,10 @@ function mountGuidedSaveWorkflow(sectionId) {
     if (completedAll) {
       stepCardEl.hidden = true;
       completeCardEl.hidden = false;
+      if (!completionDone) {
+        acknowledgeSectionCompletion(sectionId);
+        completionDone = true;
+      }
       return;
     }
 
@@ -561,6 +737,7 @@ function createBranchingInitialState() {
   state = withSyntheticWorkingChange(state, "router.js");
   state = runCommandOrKeep(state, "git add .");
   state = runCommandOrKeep(state, 'git commit -m "Add router shell"');
+  state = withSyntheticWorkingChange(state, "feature-note.md");
   return state;
 }
 
@@ -590,6 +767,7 @@ function createMergingInitialState() {
 function renderGraphFocusedSvg(svg, state, options = {}) {
   const newCommits = options.newCommits ?? new Set();
   const newBranches = options.newBranches ?? new Set();
+  const centerSingle = options.centerSingle === true;
   const activeBranch = state.detached ? null : state.HEAD;
   const commits = getGraphCommits(state);
   const headHash = getHeadHash(state);
@@ -623,6 +801,15 @@ function renderGraphFocusedSvg(svg, state, options = {}) {
   const height = Math.max(500, laneEndY + 40);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.innerHTML = "";
+
+  if (centerSingle && commits.length === 1) {
+    const only = commits[0];
+    const point = positionsByHash.get(only.hash);
+    if (point) {
+      point.x = width * 0.5;
+      point.y = height * 0.5;
+    }
+  }
 
   for (const branchName of branchNames) {
     const laneX = baseX + (branchLanes.get(branchName) ?? 0) * laneOffset;
@@ -764,6 +951,10 @@ function renderGraphFocusedSvg(svg, state, options = {}) {
 
   const laneX = new Map();
   branchNames.forEach((name) => {
+    if (centerSingle && commits.length === 1) {
+      laneX.set(name, width * 0.5);
+      return;
+    }
     laneX.set(name, baseX + (branchLanes.get(name) ?? 0) * laneOffset);
   });
 
@@ -839,12 +1030,31 @@ function mountGraphFocusedSection(section) {
 
   const { demoEl } = refs;
   const isMerging = section.id === "merging";
+  let completionDone = isSectionCompleted(section.id);
+  let hasCreatedBranch = false;
+  let hasCommittedOnBranch = false;
+  const chipCommands = isMerging
+    ? [{ command: "git merge feature/auth", tone: "history" }]
+    : [
+        { command: "git branch feature/ui", tone: "history" },
+        { command: "git switch feature/ui", tone: "history" },
+        { command: "git add .", tone: "staging" },
+        { command: 'git commit -m "Feature pass"', tone: "history" },
+      ];
 
   demoEl.innerHTML = `
     <div class="graph-focus-demo ${isMerging ? "graph-focus-merging" : "graph-focus-branching"}" data-role="graph-focus-demo">
       <div class="graph-focus-stage" data-role="graph-stage">
         <svg class="graph-focus-svg" data-role="graph-svg" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid meet" aria-label="Commit graph walkthrough"></svg>
         <div class="graph-transient-layer" data-role="graph-transient-layer"></div>
+      </div>
+      <div class="sync-command-row">
+        ${chipCommands
+          .map(
+            (chip) =>
+              `<button class="command-chip ${chipToneClass(chip.tone)}" type="button" data-command="${chip.command}">${chip.command}</button>`,
+          )
+          .join("")}
       </div>
       <form class="graph-mini-terminal" data-role="graph-terminal-form">
         <span class="graph-mini-prompt" aria-hidden="true">gitvisual ~/${section.id} $</span>
@@ -860,8 +1070,11 @@ function mountGraphFocusedSection(section) {
   const formEl = /** @type {HTMLFormElement} */ (demoEl.querySelector('[data-role="graph-terminal-form"]'));
   const inputEl = /** @type {HTMLInputElement} */ (demoEl.querySelector('[data-role="graph-terminal-input"]'));
   const resetEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="graph-terminal-reset"]'));
+  const commandChipEls = demoEl.querySelectorAll(".sync-command-row [data-command]");
 
-  const allowedCommands = isMerging ? new Set(["merge", "switch", "checkout", "branch"]) : new Set(["branch", "checkout", "switch"]);
+  const allowedCommands = isMerging
+    ? new Set(["merge"])
+    : new Set(["branch", "checkout", "switch", "add", "commit"]);
   let state = isMerging ? createMergingInitialState() : createBranchingInitialState();
   /** @type {{positionsByHash: Map<string, {x: number, y: number, branch: string}>, laneX: Map<string, number>, width: number, height: number}} */
   let graphMeta = renderGraphFocusedSvg(svgEl, state);
@@ -883,6 +1096,8 @@ function mountGraphFocusedSection(section) {
    */
   const reset = () => {
     state = isMerging ? createMergingInitialState() : createBranchingInitialState();
+    hasCreatedBranch = false;
+    hasCommittedOnBranch = false;
     layerEl.innerHTML = "";
     graphMeta = renderGraphFocusedSvg(svgEl, state);
     syncMergingShape();
@@ -893,14 +1108,18 @@ function mountGraphFocusedSection(section) {
    * @param {SubmitEvent} event
    * @returns {void}
    */
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    const rawInput = String(inputEl.value ?? "").trim();
-    if (!rawInput) {
+  /**
+   * @param {string} rawInput
+   * @returns {void}
+   */
+  const executeCommand = (rawInput) => {
+    const normalizedInput = String(rawInput ?? "").trim();
+    const rawInputText = normalizedInput;
+    if (!normalizedInput) {
       return;
     }
 
-    const parsed = parseCommand(rawInput);
+    const parsed = parseCommand(rawInputText);
     if (!parsed.ok) {
       showGraphToast(layerEl, stageEl, graphMeta, parsed.reason ?? "Invalid command");
       return;
@@ -911,13 +1130,13 @@ function mountGraphFocusedSection(section) {
         layerEl,
         stageEl,
         graphMeta,
-        isMerging ? "Use merge, checkout, switch, or branch here." : "Use branch, checkout, or switch in this section.",
+        scopeRedirectMessage(rawInputText, isMerging ? "the merging section" : "the branching section"),
       );
       return;
     }
 
     const prevState = state;
-    const result = runCommand(state, rawInput);
+    const result = runCommand(state, rawInputText);
     if (result.error) {
       showGraphToast(layerEl, stageEl, graphMeta, result.error.message ?? "Command failed.");
       return;
@@ -934,15 +1153,38 @@ function mountGraphFocusedSection(section) {
     syncMergingShape();
 
     if (parsed.command === "branch") {
+      hasCreatedBranch = true;
       showGraphToast(layerEl, stageEl, graphMeta, `Branch ${parsed.args[0]} created`, { branch: parsed.args[0] });
     } else if (parsed.command === "checkout" || parsed.command === "switch") {
       showGraphToast(layerEl, stageEl, graphMeta, `Now on ${state.detached ? "detached HEAD" : state.HEAD}`, {
         branch: state.detached ? undefined : state.HEAD,
         hash: getHeadHash(state),
       });
+    } else if (parsed.command === "add") {
+      showGraphToast(layerEl, stageEl, graphMeta, "Staged for commit on current branch");
+    } else if (parsed.command === "commit") {
+      const committedOnFeature = !result.prevState.detached && result.prevState.HEAD !== "main";
+      if (committedOnFeature) {
+        hasCommittedOnBranch = true;
+      }
+      showGraphToast(
+        layerEl,
+        stageEl,
+        graphMeta,
+        committedOnFeature ? "Commit added on feature branch" : "Commit added",
+      );
     } else if (parsed.command === "merge") {
       const newestHash = [...newCommits][0] ?? getHeadHash(state);
       showGraphToast(layerEl, stageEl, graphMeta, "Tracks converged by merge", { hash: newestHash });
+      if (isMerging && !completionDone) {
+        acknowledgeSectionCompletion(section.id);
+        completionDone = true;
+      }
+    }
+
+    if (!isMerging && hasCreatedBranch && hasCommittedOnBranch && !completionDone) {
+      acknowledgeSectionCompletion(section.id);
+      completionDone = true;
     }
 
     emit(`demo:${section.number}:state:changed`, {
@@ -951,8 +1193,33 @@ function mountGraphFocusedSection(section) {
       nextState: result.nextState,
       hints: result.animationHints,
     });
+  };
 
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const rawInput = String(inputEl.value ?? "").trim();
+    executeCommand(rawInput);
     inputEl.value = "";
+  };
+
+  /**
+   * @param {Event} event
+   * @returns {void}
+   */
+  const handleChipClick = (event) => {
+    const target = /** @type {HTMLElement | null} */ (event.target instanceof HTMLElement ? event.target : null);
+    if (!target) {
+      return;
+    }
+    const button = target.closest("[data-command]");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const command = button.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    executeCommand(command);
   };
 
   const handleReset = () => {
@@ -961,6 +1228,7 @@ function mountGraphFocusedSection(section) {
 
   formEl.addEventListener("submit", handleSubmit);
   resetEl.addEventListener("click", handleReset);
+  commandChipEls.forEach((chipEl) => chipEl.addEventListener("click", handleChipClick));
   reset();
 
   demoControllers.set(section.id, {
@@ -968,6 +1236,1260 @@ function mountGraphFocusedSection(section) {
     dispose() {
       formEl.removeEventListener("submit", handleSubmit);
       resetEl.removeEventListener("click", handleReset);
+      commandChipEls.forEach((chipEl) => chipEl.removeEventListener("click", handleChipClick));
+    },
+  });
+}
+
+/**
+ * @param {import("../simulator/state.js").GitState} state
+ * @param {string} seed
+ * @returns {string}
+ */
+function createSyntheticHash(state, seed) {
+  let hash = 5381;
+  const value = `${seed}|${Date.now()}`;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+  }
+
+  let candidate = hash.toString(16).padStart(8, "0").slice(0, 7);
+  let suffix = 0;
+  while (Object.hasOwn(state.commits, candidate)) {
+    suffix += 1;
+    const mixed = (hash + suffix * 1013904223) >>> 0;
+    candidate = mixed.toString(16).padStart(8, "0").slice(0, 7);
+  }
+
+  return candidate;
+}
+
+/**
+ * @returns {import("../simulator/state.js").GitState}
+ */
+function createSyncingInitialState() {
+  const base = createBranchingInitialState();
+  const nextState = structuredClone(base);
+  const remoteParent = nextState.remoteBranches.main;
+  const remoteHash = createSyntheticHash(nextState, "remote-sync-ahead");
+
+  nextState.commits[remoteHash] = {
+    hash: remoteHash,
+    message: "Remote: CI workflow update",
+    parents: remoteParent ? [remoteParent] : [],
+    branch: "main",
+    timestamp: Date.now() - 2500,
+  };
+  nextState.remoteBranches.main = remoteHash;
+  nextState.trackingBranches.main = "origin/main";
+
+  return nextState;
+}
+
+/**
+ * @param {Record<string, import("../simulator/state.js").CommitObject>} commits
+ * @param {string | null | undefined} headHash
+ * @param {number} [limit=6]
+ * @returns {Array<import("../simulator/state.js").CommitObject>}
+ */
+function getFirstParentChain(commits, headHash, limit = 6) {
+  const chain = [];
+  const seen = new Set();
+  let current = headHash ?? null;
+
+  while (current && !seen.has(current) && chain.length < limit) {
+    const commit = commits[current];
+    if (!commit) {
+      break;
+    }
+
+    chain.push(commit);
+    seen.add(current);
+    current = Array.isArray(commit.parents) && commit.parents.length > 0 ? commit.parents[0] : null;
+  }
+
+  return chain;
+}
+
+/**
+ * @param {"local" | "remote"} side
+ * @param {Array<import("../simulator/state.js").CommitObject>} chain
+ * @param {string | null | undefined} tipHash
+ * @returns {string}
+ */
+function renderSyncHistory(side, chain, tipHash) {
+  const sideLabel = side === "local" ? "Local" : "Remote";
+  const refName = side === "local" ? "main" : "origin/main";
+  return `
+    <div class="sync-history-header">
+      <span class="sync-side-title">${sideLabel}</span>
+      <span class="sync-ref-pill">${refName}</span>
+    </div>
+    <div class="sync-history-list">
+      ${chain
+        .map((commit, index) => {
+          const isTip = commit.hash === tipHash;
+          const rowClass = isTip ? "sync-history-row is-tip" : "sync-history-row";
+          const lineClass = index === chain.length - 1 ? "sync-history-line is-end" : "sync-history-line";
+          return `
+            <div class="${rowClass}">
+              <span class="sync-history-node" aria-hidden="true"></span>
+              <span class="${lineClass}" aria-hidden="true"></span>
+              <span class="sync-history-hash">${commit.hash.slice(0, 7)}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+/**
+ * @param {HTMLElement} layerEl
+ * @param {string} message
+ * @param {"left" | "center" | "right"} anchor
+ * @returns {void}
+ */
+function showSyncToast(layerEl, message, anchor) {
+  const toast = document.createElement("div");
+  toast.className = `sync-transient-label sync-transient-${anchor}`;
+  toast.textContent = message;
+  layerEl.appendChild(toast);
+
+  window.setTimeout(() => {
+    toast.classList.add("is-leaving");
+    window.setTimeout(() => toast.remove(), 260);
+  }, 1300);
+}
+
+/**
+ * @param {HTMLElement} pulseEl
+ * @param {"rtl-tracking" | "ltr-remote"} mode
+ * @returns {Promise<void>}
+ */
+function playSyncPulse(pulseEl, mode) {
+  return new Promise((resolve) => {
+    pulseEl.classList.remove("is-active", "pulse-rtl-tracking", "pulse-ltr-remote");
+    // Force reflow so restarting animation is reliable.
+    void pulseEl.offsetWidth;
+    pulseEl.classList.add("is-active", `pulse-${mode}`);
+
+    const complete = () => {
+      pulseEl.classList.remove("is-active", `pulse-${mode}`);
+      pulseEl.removeEventListener("animationend", complete);
+      resolve();
+    };
+
+    pulseEl.addEventListener("animationend", complete, { once: true });
+  });
+}
+
+/**
+ * @param {{id: string, number: string}} section
+ * @returns {void}
+ */
+function mountSplitSyncWorldSection(section) {
+  const refs = sectionRefs.get(section.id);
+  if (!refs) {
+    return;
+  }
+
+  const { demoEl } = refs;
+  demoEl.innerHTML = `
+    <div class="sync-world-demo" data-role="sync-world-demo">
+      <div class="sync-command-row">
+        <button class="command-chip chip-tone-remote" type="button" data-command="git fetch">git fetch</button>
+        <button class="command-chip chip-tone-history" type="button" data-command="git merge origin/main">git merge origin/main</button>
+        <button class="command-chip chip-tone-remote" type="button" data-command="git pull">git pull</button>
+        <button class="command-chip chip-tone-remote" type="button" data-command="git push">git push</button>
+      </div>
+      <div class="sync-world-stage" data-role="sync-world-stage">
+        <section class="sync-world-side sync-world-local" data-role="sync-local"></section>
+        <div class="sync-world-channel">
+          <div class="sync-channel-line" aria-hidden="true"></div>
+          <div class="sync-tracking-ref" data-role="sync-tracking-ref">origin/main</div>
+          <div class="sync-channel-pulse" data-role="sync-channel-pulse" aria-hidden="true"></div>
+        </div>
+        <section class="sync-world-side sync-world-remote" data-role="sync-remote"></section>
+        <div class="sync-transient-layer" data-role="sync-transient-layer"></div>
+      </div>
+      <form class="graph-mini-terminal" data-role="sync-terminal-form">
+        <span class="graph-mini-prompt" aria-hidden="true">gitvisual ~/syncing-remote $</span>
+        <input class="graph-mini-input" data-role="sync-terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="try: git fetch | git merge origin/main | git pull | git push" />
+        <button class="graph-mini-reset" type="button" data-role="sync-reset">Reset</button>
+      </form>
+    </div>
+  `;
+
+  const localEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="sync-local"]'));
+  const remoteEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="sync-remote"]'));
+  const layerEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="sync-transient-layer"]'));
+  const pulseEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="sync-channel-pulse"]'));
+  const trackingRefEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="sync-tracking-ref"]'));
+  const formEl = /** @type {HTMLFormElement} */ (demoEl.querySelector('[data-role="sync-terminal-form"]'));
+  const inputEl = /** @type {HTMLInputElement} */ (demoEl.querySelector('[data-role="sync-terminal-input"]'));
+  const resetEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="sync-reset"]'));
+  const commandChipEls = demoEl.querySelectorAll(".sync-command-row [data-command]");
+
+  let state = createSyncingInitialState();
+  let trackingHash = state.branches[state.HEAD];
+  let isRunning = false;
+  let sawFetch = false;
+  let sawPull = false;
+  let completionDone = isSectionCompleted(section.id);
+
+  /**
+   * @returns {void}
+   */
+  const renderWorlds = () => {
+    const branch = state.detached ? "main" : state.HEAD;
+    const localTip = state.branches[branch] ?? null;
+    const remoteTip = state.remoteBranches[branch] ?? null;
+    const localChain = getFirstParentChain(state.commits, localTip, 6);
+    const remoteChain = getFirstParentChain(state.commits, remoteTip, 6);
+
+    localEl.innerHTML = renderSyncHistory("local", localChain, localTip);
+    remoteEl.innerHTML = renderSyncHistory("remote", remoteChain, remoteTip);
+
+    const trackingInSync = Boolean(trackingHash && remoteTip && trackingHash === remoteTip);
+    trackingRefEl.classList.toggle("is-updated", trackingInSync);
+  };
+
+  /**
+   * @param {string} rawInput
+   * @returns {Promise<void>}
+   */
+  const executeCommand = async (rawInput) => {
+    if (isRunning) {
+      return;
+    }
+
+    const parsed = parseCommand(rawInput);
+    if (!parsed.ok) {
+      showSyncToast(layerEl, parsed.reason ?? "Invalid command.", "center");
+      return;
+    }
+
+    if (!["fetch", "merge", "pull", "push"].includes(parsed.command)) {
+      showSyncToast(layerEl, scopeRedirectMessage(rawInput, "the sync section"), "center");
+      return;
+    }
+
+    isRunning = true;
+    const branch = state.detached ? "main" : state.HEAD;
+    const remoteTipBefore = state.remoteBranches[branch] ?? null;
+    /** @type {import("../simulator/result.js").CommandResult | null} */
+    let executedResult = null;
+
+    try {
+      if (parsed.command === "fetch") {
+        sawFetch = true;
+        await playSyncPulse(pulseEl, "rtl-tracking");
+        const result = runCommand(state, "git fetch");
+        if (result.error) {
+          showSyncToast(layerEl, result.error.message ?? "Fetch failed.", "center");
+          return;
+        }
+        executedResult = result;
+        state = result.nextState;
+        trackingHash = state.remoteBranches[branch] ?? trackingHash;
+        renderWorlds();
+        showSyncToast(layerEl, "Tracking ref updated", "center");
+      } else if (parsed.command === "merge") {
+        const remoteTip = state.remoteBranches[branch] ?? null;
+        if (!remoteTip || trackingHash !== remoteTip) {
+          showSyncToast(layerEl, "Fetch first so tracking is current.", "center");
+          return;
+        }
+
+        const mergeTarget = parsed.args[0] ? rawInput : "git merge origin/main";
+        const result = runCommand(state, mergeTarget);
+        if (result.error) {
+          showSyncToast(layerEl, result.error.message ?? "Merge failed.", "left");
+          return;
+        }
+        executedResult = result;
+        state = result.nextState;
+        localEl.classList.add("is-updating");
+        renderWorlds();
+        showSyncToast(layerEl, "Local history merged", "left");
+        window.setTimeout(() => localEl.classList.remove("is-updating"), 420);
+      } else if (parsed.command === "pull") {
+        sawPull = true;
+        await playSyncPulse(pulseEl, "rtl-tracking");
+        const result = runCommand(state, "git pull");
+        if (result.error) {
+          showSyncToast(layerEl, result.error.message ?? "Pull failed.", "center");
+          return;
+        }
+        executedResult = result;
+        state = result.nextState;
+        trackingHash = state.remoteBranches[branch] ?? trackingHash;
+        renderWorlds();
+        localEl.classList.add("is-updating");
+        showSyncToast(layerEl, "Fetched then merged", "left");
+        window.setTimeout(() => localEl.classList.remove("is-updating"), 460);
+      } else if (parsed.command === "push") {
+        await playSyncPulse(pulseEl, "ltr-remote");
+        const result = runCommand(state, "git push");
+        if (result.error) {
+          showSyncToast(layerEl, result.error.message ?? "Push failed.", "right");
+          return;
+        }
+        executedResult = result;
+        state = result.nextState;
+        renderWorlds();
+        const remoteTipAfter = state.remoteBranches[branch] ?? null;
+        if (remoteTipAfter !== remoteTipBefore) {
+          remoteEl.classList.add("is-updating");
+          window.setTimeout(() => remoteEl.classList.remove("is-updating"), 420);
+        }
+        showSyncToast(layerEl, "Remote updated", "right");
+      }
+
+      if (executedResult) {
+        emit(`demo:${section.number}:state:changed`, {
+          sectionId: section.id,
+          prevState: executedResult.prevState,
+          nextState: executedResult.nextState,
+          hints: executedResult.animationHints,
+        });
+      }
+
+      if (sawFetch && sawPull && !completionDone) {
+        acknowledgeSectionCompletion(section.id);
+        completionDone = true;
+      }
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  /**
+   * @returns {void}
+   */
+  const reset = () => {
+    state = createSyncingInitialState();
+    trackingHash = state.branches[state.HEAD];
+    sawFetch = false;
+    sawPull = false;
+    localEl.classList.remove("is-updating");
+    remoteEl.classList.remove("is-updating");
+    layerEl.innerHTML = "";
+    renderWorlds();
+    showSyncToast(layerEl, "Two worlds start diverged", "center");
+  };
+
+  /**
+   * @param {SubmitEvent} event
+   * @returns {void}
+   */
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const rawInput = String(inputEl.value ?? "").trim();
+    if (!rawInput) {
+      return;
+    }
+    await executeCommand(rawInput);
+    inputEl.value = "";
+  };
+
+  /**
+   * @param {Event} event
+   * @returns {void}
+   */
+  const handleChipClick = async (event) => {
+    const target = /** @type {HTMLElement | null} */ (event.target instanceof HTMLElement ? event.target : null);
+    if (!target) {
+      return;
+    }
+    const button = target.closest("[data-command]");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const command = button.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    await executeCommand(command);
+  };
+
+  const handleReset = () => reset();
+
+  formEl.addEventListener("submit", handleSubmit);
+  resetEl.addEventListener("click", handleReset);
+  commandChipEls.forEach((chipEl) => chipEl.addEventListener("click", handleChipClick));
+  reset();
+
+  demoControllers.set(section.id, {
+    reset,
+    dispose() {
+      formEl.removeEventListener("submit", handleSubmit);
+      resetEl.removeEventListener("click", handleReset);
+      commandChipEls.forEach((chipEl) => chipEl.removeEventListener("click", handleChipClick));
+    },
+  });
+}
+
+/**
+ * @returns {import("../simulator/state.js").GitState}
+ */
+function createUndoTimelineInitialState() {
+  let state = createInitialState();
+
+  const seedCommits = [
+    { file: "layout.css", message: "Refine layout spacing" },
+    { file: "menu.js", message: "Add menu interactions" },
+    { file: "api-client.js", message: "Wire API client" },
+    { file: "theme.css", message: "Tune visual theme" },
+  ];
+
+  for (const item of seedCommits) {
+    state = withSyntheticWorkingChange(state, item.file);
+    state = runCommandOrKeep(state, "git add .");
+    state = runCommandOrKeep(state, `git commit -m "${item.message}"`);
+  }
+
+  const nextState = structuredClone(state);
+  nextState.stagingArea = [{ name: "draft-plan.md", status: "modified" }];
+  nextState.workingDirectory = [{ name: "experiment.css", status: "modified" }];
+  return nextState;
+}
+
+/**
+ * @param {import("../simulator/state.js").GitState} state
+ * @returns {Set<string>}
+ */
+function getReachableHashes(state) {
+  const reachable = new Set();
+  const stack = Object.values(state.branches);
+
+  while (stack.length > 0) {
+    const hash = stack.pop();
+    if (!hash || reachable.has(hash)) {
+      continue;
+    }
+
+    reachable.add(hash);
+    const commit = state.commits[hash];
+    if (!commit || !Array.isArray(commit.parents)) {
+      continue;
+    }
+
+    for (const parentHash of commit.parents) {
+      if (parentHash && !reachable.has(parentHash)) {
+        stack.push(parentHash);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+/**
+ * @param {import("../simulator/state.js").GitState} state
+ * @returns {Array<import("../simulator/state.js").CommitObject>}
+ */
+function getTimelineCommits(state) {
+  return Object.values(state.commits).sort((a, b) => {
+    if (a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    return a.hash.localeCompare(b.hash);
+  });
+}
+
+/**
+ * @param {{id: string, number: string}} section
+ * @returns {void}
+ */
+function mountTimelineUndoSection(section) {
+  const refs = sectionRefs.get(section.id);
+  if (!refs) {
+    return;
+  }
+
+  const { demoEl } = refs;
+  demoEl.innerHTML = `
+    <div class="undo-timeline-demo">
+      <div class="sync-command-row undo-command-row">
+        <button class="command-chip chip-tone-destructive" type="button" data-command="git reset --soft HEAD~1">git reset --soft HEAD~1</button>
+        <button class="command-chip chip-tone-destructive" type="button" data-command="git reset --mixed HEAD~1">git reset --mixed HEAD~1</button>
+        <button class="command-chip chip-tone-destructive" type="button" data-command="git reset --hard HEAD~1">git reset --hard HEAD~1</button>
+        <button class="command-chip chip-tone-history" type="button" data-role="undo-revert-chip">git revert</button>
+      </div>
+      <div class="undo-timeline-shell" data-role="undo-timeline-shell"></div>
+      <div class="undo-reset-indicator" data-role="undo-indicator"></div>
+      <p class="undo-command-note" data-role="undo-note"></p>
+      <form class="graph-mini-terminal" data-role="undo-terminal-form">
+        <span class="graph-mini-prompt" aria-hidden="true">gitvisual ~/undoing-changes $</span>
+        <input class="graph-mini-input" data-role="undo-terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="try: git reset --hard HEAD~2 or git revert" />
+        <button class="graph-mini-reset" type="button" data-role="undo-reset">Reset</button>
+      </form>
+    </div>
+  `;
+
+  const timelineEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="undo-timeline-shell"]'));
+  const indicatorEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="undo-indicator"]'));
+  const noteEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="undo-note"]'));
+  const formEl = /** @type {HTMLFormElement} */ (demoEl.querySelector('[data-role="undo-terminal-form"]'));
+  const inputEl = /** @type {HTMLInputElement} */ (demoEl.querySelector('[data-role="undo-terminal-input"]'));
+  const resetEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="undo-reset"]'));
+  const revertChipEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="undo-revert-chip"]'));
+  const commandChipEls = demoEl.querySelectorAll(".undo-command-row [data-command], .undo-command-row [data-role='undo-revert-chip']");
+
+  let state = createUndoTimelineInitialState();
+  /** @type {{kind: "idle" | "reset" | "revert", mode?: "soft"|"mixed"|"hard", message: string}} */
+  let status = { kind: "idle", message: "Timeline ready: reset moves back, revert moves forward." };
+  let sawReset = false;
+  let sawRevert = false;
+  let completionDone = isSectionCompleted(section.id);
+
+  /**
+   * @returns {void}
+   */
+  const renderTimeline = () => {
+    const commits = getTimelineCommits(state);
+    const headHash = getHeadHash(state);
+    const reachable = getReachableHashes(state);
+    const headIndex = Math.max(
+      0,
+      commits.findIndex((commit) => commit.hash === headHash),
+    );
+    const maxIndex = Math.max(1, commits.length - 1);
+    const playheadPercent = (headIndex / maxIndex) * 100;
+
+    timelineEl.innerHTML = `
+      <div class="undo-timeline-track">
+        <div class="undo-timeline-line" aria-hidden="true"></div>
+        <div class="undo-commit-row" style="grid-template-columns: repeat(${commits.length}, minmax(84px, 1fr));">
+          ${commits
+            .map((commit) => {
+              const isHead = commit.hash === headHash;
+              const isReachable = reachable.has(commit.hash);
+              const classes = [
+                "undo-commit-cell",
+                isHead ? "is-head" : "",
+                isReachable ? "is-reachable" : "is-unreachable",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return `
+                <article class="${classes}">
+                  <span class="undo-commit-point" aria-hidden="true"></span>
+                  <p class="undo-commit-hash">${commit.hash.slice(0, 7)}</p>
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+        <div class="undo-playhead" style="left: calc(${playheadPercent}%);">
+          <span class="undo-playhead-label">HEAD</span>
+        </div>
+      </div>
+    `;
+
+    if (revertChipEl) {
+      revertChipEl.setAttribute("data-command", `git revert ${headHash.slice(0, 7)}`);
+      revertChipEl.textContent = "git revert";
+    }
+  };
+
+  /**
+   * @returns {void}
+   */
+  const renderIndicator = () => {
+    if (status.kind === "reset") {
+      const modeClass = status.mode ? `is-${status.mode}` : "";
+      indicatorEl.className = `undo-reset-indicator ${modeClass}`.trim();
+      indicatorEl.innerHTML = `
+        <span class="undo-indicator-pill">reset --${status.mode}</span>
+        <span class="undo-indicator-copy">${status.message}</span>
+      `;
+      noteEl.textContent = "";
+      return;
+    }
+
+    if (status.kind === "revert") {
+      indicatorEl.className = "undo-reset-indicator is-revert";
+      indicatorEl.innerHTML = `
+        <span class="undo-indicator-pill">revert</span>
+        <span class="undo-indicator-copy">${status.message}</span>
+      `;
+      noteEl.textContent = "";
+      return;
+    }
+
+    indicatorEl.className = "undo-reset-indicator";
+    indicatorEl.innerHTML = `
+      <span class="undo-indicator-pill">status</span>
+      <span class="undo-indicator-copy">${status.message}</span>
+    `;
+    noteEl.textContent = "";
+  };
+
+  /**
+   * @returns {void}
+   */
+  const renderUndo = () => {
+    renderTimeline();
+    renderIndicator();
+  };
+
+  /**
+   * @param {string} rawInput
+   * @returns {void}
+   */
+  const executeCommand = (rawInput) => {
+    const normalized = String(rawInput ?? "").trim();
+    if (!normalized) {
+      return;
+    }
+
+    const parsed = parseCommand(normalized);
+    if (!parsed.ok) {
+      noteEl.textContent = parsed.reason ?? "Invalid command.";
+      return;
+    }
+
+    if (!["reset", "revert"].includes(parsed.command)) {
+      noteEl.textContent = scopeRedirectMessage(normalized, "the undo section");
+      return;
+    }
+
+    let commandToRun = normalized;
+    if (parsed.command === "revert" && parsed.args.length === 0) {
+      commandToRun = `git revert ${getHeadHash(state)}`;
+    }
+
+    const result = runCommand(state, commandToRun);
+    if (result.error) {
+      noteEl.textContent = result.error.message ?? "Command failed.";
+      return;
+    }
+
+    state = result.nextState;
+    const resetHint = (result.animationHints ?? []).find((hint) => hint.type === "RESET_PERFORMED");
+    const revertHint = (result.animationHints ?? []).find((hint) => hint.type === "REVERT_COMMIT");
+
+    if (resetHint && typeof resetHint.mode === "string") {
+      sawReset = true;
+      /** @type {"soft"|"mixed"|"hard"} */
+      const mode = resetHint.mode;
+      if (mode === "soft") {
+        status = {
+          kind: "reset",
+          mode,
+          message: "Soft reset keeps changes staged.",
+        };
+      } else if (mode === "mixed") {
+        status = {
+          kind: "reset",
+          mode,
+          message: "Mixed reset returns files to working directory.",
+        };
+      } else {
+        status = {
+          kind: "reset",
+          mode,
+          message: "Hard reset clears working and staged changes.",
+        };
+      }
+    } else if (revertHint) {
+      sawRevert = true;
+      status = {
+        kind: "revert",
+        message: "Revert creates a new commit to move history forward.",
+      };
+    } else {
+      status = { kind: "idle", message: "Timeline updated." };
+    }
+
+    if (sawReset && sawRevert && !completionDone) {
+      acknowledgeSectionCompletion(section.id);
+      completionDone = true;
+    }
+
+    renderUndo();
+    emit(`demo:${section.number}:state:changed`, {
+      sectionId: section.id,
+      prevState: result.prevState,
+      nextState: result.nextState,
+      hints: result.animationHints,
+    });
+  };
+
+  /**
+   * @returns {void}
+   */
+  const reset = () => {
+    state = createUndoTimelineInitialState();
+    status = { kind: "idle", message: "Timeline ready: reset moves back, revert moves forward." };
+    sawReset = false;
+    sawRevert = false;
+    renderUndo();
+  };
+
+  /**
+   * @param {SubmitEvent} event
+   * @returns {void}
+   */
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const rawInput = String(inputEl.value ?? "").trim();
+    executeCommand(rawInput);
+    inputEl.value = "";
+  };
+
+  /**
+   * @param {Event} event
+   * @returns {void}
+   */
+  const handleChipClick = (event) => {
+    const target = /** @type {HTMLElement | null} */ (event.target instanceof HTMLElement ? event.target : null);
+    if (!target) {
+      return;
+    }
+    const button = target.closest("[data-command]");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const command = button.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    executeCommand(command);
+  };
+
+  const handleReset = () => reset();
+
+  formEl.addEventListener("submit", handleSubmit);
+  resetEl.addEventListener("click", handleReset);
+  commandChipEls.forEach((chipEl) => chipEl.addEventListener("click", handleChipClick));
+  reset();
+
+  demoControllers.set(section.id, {
+    reset,
+    dispose() {
+      formEl.removeEventListener("submit", handleSubmit);
+      resetEl.removeEventListener("click", handleReset);
+      commandChipEls.forEach((chipEl) => chipEl.removeEventListener("click", handleChipClick));
+    },
+  });
+}
+
+/**
+ * @param {{id: string, number: string}} section
+ * @returns {void}
+ */
+function mountStashShelfSection(section) {
+  const refs = sectionRefs.get(section.id);
+  if (!refs) {
+    return;
+  }
+
+  const { demoEl } = refs;
+  demoEl.innerHTML = `
+    <div class="stash-shelf-demo">
+      <div class="sync-command-row stash-command-row">
+        <button class="command-chip chip-tone-staging" type="button" data-command="git stash">git stash</button>
+        <button class="command-chip chip-tone-staging" type="button" data-command="git stash pop">git stash pop</button>
+        <button class="command-chip chip-tone-staging" type="button" data-command="git stash apply">git stash apply</button>
+        <button class="command-chip chip-tone-staging" type="button" data-command="git stash list">git stash list</button>
+      </div>
+
+      <div class="stash-stage" data-role="stash-stage">
+        <section class="stash-working-area">
+          <header class="stash-area-header">
+            <h3 class="stash-area-title">Working Area</h3>
+          </header>
+          <div class="stash-working-cards" data-role="stash-working-cards"></div>
+        </section>
+
+        <aside class="stash-shelf-area">
+          <header class="stash-area-header">
+            <h3 class="stash-area-title">Stash Shelf</h3>
+          </header>
+          <div class="stash-shelf-bin" data-role="stash-shelf-bin">
+            <div class="stash-shelf-empty" data-role="stash-shelf-empty">
+              <span class="stash-shelf-empty-icon" aria-hidden="true">[ ]</span>
+              <span class="stash-shelf-empty-copy">Shelf is empty</span>
+            </div>
+            <div class="stash-stack" data-role="stash-stack"></div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="stash-terminal-output" data-role="stash-output"></div>
+      <form class="graph-mini-terminal" data-role="stash-terminal-form">
+        <span class="graph-mini-prompt" aria-hidden="true">gitvisual ~/stashing $</span>
+        <input class="graph-mini-input" data-role="stash-terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="try: git stash | git stash pop | git stash apply | git stash list" />
+        <button class="graph-mini-reset" type="button" data-role="stash-reset">Reset</button>
+      </form>
+    </div>
+  `;
+
+  const workingCardsEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="stash-working-cards"]'));
+  const stackEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="stash-stack"]'));
+  const emptyEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="stash-shelf-empty"]'));
+  const outputEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="stash-output"]'));
+  const formEl = /** @type {HTMLFormElement} */ (demoEl.querySelector('[data-role="stash-terminal-form"]'));
+  const inputEl = /** @type {HTMLInputElement} */ (demoEl.querySelector('[data-role="stash-terminal-input"]'));
+  const resetEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="stash-reset"]'));
+  const commandChipEls = demoEl.querySelectorAll(".stash-command-row [data-command]");
+
+  let state = createInitialState();
+  let isAnimating = false;
+  let didStash = false;
+  let didPop = false;
+  let completionDone = isSectionCompleted(section.id);
+
+  /**
+   * @param {string} value
+   * @returns {string}
+   */
+  const sanitize = (value) => escapeHtml(value);
+
+  /**
+   * @param {"info"|"success"|"error"} tone
+   * @param {string} text
+   * @returns {void}
+   */
+  const printOutput = (tone, text) => {
+    const line = document.createElement("p");
+    line.className = `stash-output-line is-${tone}`;
+    line.textContent = text;
+    outputEl.appendChild(line);
+    const lines = outputEl.querySelectorAll(".stash-output-line");
+    if (lines.length > 7) {
+      lines[0]?.remove();
+    }
+    outputEl.scrollTop = outputEl.scrollHeight;
+  };
+
+  /**
+   * @returns {void}
+   */
+  const renderShelf = () => {
+    workingCardsEl.innerHTML = state.workingDirectory
+      .map(
+        (file) => `
+          <article class="stash-working-card" data-file="${sanitize(file.name)}">
+            <p class="stash-working-name">${sanitize(file.name)}</p>
+            <p class="stash-working-status">${sanitize(file.status)}</p>
+          </article>
+        `,
+      )
+      .join("");
+
+    stackEl.innerHTML = state.stash
+      .map((entry, index) => {
+        const isTop = index === 0;
+        return `
+          <article class="stash-entry ${isTop ? "is-top" : ""}" data-entry="${sanitize(entry.id)}" style="--stack-depth:${index};">
+            <p class="stash-entry-id">${sanitize(entry.id)}</p>
+            <div class="stash-entry-files">
+              ${entry.files
+                .slice(0, 4)
+                .map((file) => `<span class="stash-entry-file" data-file="${sanitize(file.name)}">${sanitize(file.name)}</span>`)
+                .join("")}
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+
+    const hasStash = state.stash.length > 0;
+    emptyEl.hidden = hasStash;
+    stackEl.hidden = !hasStash;
+  };
+
+  /**
+   * @param {string[]} fileNames
+   * @returns {Map<string, DOMRect>}
+   */
+  const captureWorkingRects = (fileNames) => {
+    const map = new Map();
+    for (const name of fileNames) {
+      const card = workingCardsEl.querySelector(`[data-file="${CSS.escape(name)}"]`);
+      if (card instanceof HTMLElement) {
+        map.set(name, card.getBoundingClientRect());
+      }
+    }
+    return map;
+  };
+
+  /**
+   * @returns {Map<string, DOMRect>}
+   */
+  const captureTopEntryRects = () => {
+    const map = new Map();
+    const topEntry = stackEl.querySelector(".stash-entry.is-top");
+    if (!(topEntry instanceof HTMLElement)) {
+      return map;
+    }
+    const fileEls = topEntry.querySelectorAll(".stash-entry-file[data-file]");
+    fileEls.forEach((fileEl) => {
+      if (!(fileEl instanceof HTMLElement)) {
+        return;
+      }
+      const fileName = fileEl.getAttribute("data-file");
+      if (!fileName) {
+        return;
+      }
+      map.set(fileName, fileEl.getBoundingClientRect());
+    });
+    return map;
+  };
+
+  /**
+   * @param {string[]} fileNames
+   * @returns {Map<string, DOMRect>}
+   */
+  const captureTopEntryTargetRects = (fileNames) => {
+    const map = new Map();
+    const topEntry = stackEl.querySelector(".stash-entry.is-top");
+    if (!(topEntry instanceof HTMLElement)) {
+      return map;
+    }
+    for (const name of fileNames) {
+      const fileEl = topEntry.querySelector(`[data-file="${CSS.escape(name)}"]`);
+      if (fileEl instanceof HTMLElement) {
+        map.set(name, fileEl.getBoundingClientRect());
+      }
+    }
+    return map;
+  };
+
+  /**
+   * @param {string[]} fileNames
+   * @returns {Map<string, DOMRect>}
+   */
+  const captureWorkingTargetRects = (fileNames) => {
+    const map = new Map();
+    for (const name of fileNames) {
+      const card = workingCardsEl.querySelector(`[data-file="${CSS.escape(name)}"]`);
+      if (card instanceof HTMLElement) {
+        map.set(name, card.getBoundingClientRect());
+      }
+    }
+    return map;
+  };
+
+  /**
+   * @param {Map<string, DOMRect>} fromRects
+   * @param {Map<string, DOMRect>} toRects
+   * @param {{drop?: boolean}} [options]
+   * @returns {Promise<void>}
+   */
+  const animateRectFlight = async (fromRects, toRects, options = {}) => {
+    const ghosts = [];
+
+    for (const [name, from] of fromRects.entries()) {
+      const to = toRects.get(name);
+      if (!to) {
+        continue;
+      }
+
+      const ghost = document.createElement("div");
+      ghost.className = "stash-flight-ghost";
+      ghost.textContent = name;
+      ghost.style.left = `${from.left}px`;
+      ghost.style.top = `${from.top}px`;
+      ghost.style.width = `${from.width}px`;
+      ghost.style.height = `${from.height}px`;
+      document.body.appendChild(ghost);
+
+      const deltaX = to.left - from.left;
+      const deltaY = to.top - from.top;
+      const rotate = options.drop ? 6 : -4;
+
+      const animation = ghost.animate(
+        [
+          { transform: "translate(0px, 0px) scale(1) rotate(0deg)", opacity: 1, offset: 0 },
+          {
+            transform: `translate(${deltaX}px, ${deltaY}px) scale(0.82) rotate(${rotate}deg)`,
+            opacity: 0.96,
+            offset: 1,
+          },
+        ],
+        {
+          duration: 560,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          fill: "forwards",
+        },
+      );
+
+      ghosts.push({ ghost, animation });
+    }
+
+    if (ghosts.length === 0) {
+      return;
+    }
+
+    await Promise.all(ghosts.map(({ animation }) => animation.finished.catch(() => {})));
+    ghosts.forEach(({ ghost }) => ghost.remove());
+  };
+
+  /**
+   * @returns {void}
+   */
+  const reset = () => {
+    state = createInitialState();
+    didStash = false;
+    didPop = false;
+    outputEl.innerHTML = "";
+    printOutput("info", "Shelf ready. Try git stash.");
+    renderShelf();
+  };
+
+  /**
+   * @param {string} rawInput
+   * @returns {Promise<void>}
+   */
+  const executeCommand = async (rawInput) => {
+    if (isAnimating) {
+      return;
+    }
+
+    const command = String(rawInput ?? "").trim();
+    if (!command) {
+      return;
+    }
+
+    const parsed = parseCommand(command);
+    if (!parsed.ok) {
+      printOutput("error", parsed.reason ?? "Invalid command.");
+      return;
+    }
+
+    if (!["stash", "stash:pop", "stash:apply", "stash:list"].includes(parsed.command)) {
+      printOutput("info", scopeRedirectMessage(command, "the stash section"));
+      return;
+    }
+
+    const preWorkingFiles = state.workingDirectory.map((file) => file.name);
+    const preTopEntryRects = captureTopEntryRects();
+    const preWorkingRects = captureWorkingRects(preWorkingFiles);
+    const result = runCommand(state, command);
+    if (result.error) {
+      printOutput("error", result.error.message ?? "Command failed.");
+      return;
+    }
+
+    state = result.nextState;
+    renderShelf();
+
+    if (parsed.command === "stash:list") {
+      if (state.stash.length === 0) {
+        printOutput("info", "stash list is empty");
+      } else {
+        state.stash.forEach((entry) => {
+          printOutput("info", `${entry.id}: ${entry.message}`);
+        });
+      }
+      emit(`demo:${section.number}:state:changed`, {
+        sectionId: section.id,
+        prevState: result.prevState,
+        nextState: result.nextState,
+        hints: result.animationHints,
+      });
+      return;
+    }
+
+    isAnimating = true;
+    try {
+      if (parsed.command === "stash") {
+        didStash = true;
+        const toRects = captureTopEntryTargetRects(preWorkingFiles);
+        await animateRectFlight(preWorkingRects, toRects, { drop: true });
+        printOutput("success", `stashed ${preWorkingFiles.length} file(s)`);
+      } else if (parsed.command === "stash:pop" || parsed.command === "stash:apply") {
+        if (parsed.command === "stash:pop") {
+          didPop = true;
+        }
+        const movedFiles = (result.animationHints ?? [])
+          .find((hint) => hint.type === "FILES_RESTORED")
+          ?.files?.filter(Boolean);
+        const fileNames = Array.isArray(movedFiles) ? movedFiles : [];
+        const toRects = captureWorkingTargetRects(fileNames);
+        await animateRectFlight(preTopEntryRects, toRects);
+        printOutput("success", parsed.command === "stash:pop" ? "popped top stash entry" : "applied top stash entry");
+      }
+    } finally {
+      isAnimating = false;
+    }
+
+    if (didStash && didPop && !completionDone) {
+      acknowledgeSectionCompletion(section.id);
+      completionDone = true;
+    }
+
+    emit(`demo:${section.number}:state:changed`, {
+      sectionId: section.id,
+      prevState: result.prevState,
+      nextState: result.nextState,
+      hints: result.animationHints,
+    });
+  };
+
+  /**
+   * @param {SubmitEvent} event
+   * @returns {void}
+   */
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const rawInput = inputEl.value;
+    inputEl.value = "";
+    await executeCommand(rawInput);
+  };
+
+  /**
+   * @param {Event} event
+   * @returns {void}
+   */
+  const handleChipClick = async (event) => {
+    const target = /** @type {HTMLElement | null} */ (event.target instanceof HTMLElement ? event.target : null);
+    if (!target) {
+      return;
+    }
+
+    const button = target.closest("[data-command]");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const command = button.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    await executeCommand(command);
+  };
+
+  const handleReset = () => reset();
+
+  formEl.addEventListener("submit", handleSubmit);
+  resetEl.addEventListener("click", handleReset);
+  commandChipEls.forEach((chipEl) => chipEl.addEventListener("click", handleChipClick));
+  reset();
+
+  demoControllers.set(section.id, {
+    reset,
+    dispose() {
+      formEl.removeEventListener("submit", handleSubmit);
+      resetEl.removeEventListener("click", handleReset);
+      commandChipEls.forEach((chipEl) => chipEl.removeEventListener("click", handleChipClick));
+    },
+  });
+}
+
+/**
+ * @param {{id: string, number: string, heading: string}} section
+ * @returns {void}
+ */
+function mountWorkspacePlaygroundSection(section) {
+  const refs = sectionRefs.get(section.id);
+  if (!refs) {
+    return;
+  }
+
+  const { demoEl } = refs;
+  demoEl.innerHTML = `
+    <div class="playground-workspace">
+      <div class="playground-toolbar">
+        <button class="playground-reset-cta" type="button" data-role="playground-reset">Reset Workspace</button>
+      </div>
+      <div class="playground-grid">
+        <section class="playground-pane playground-pane-zones">
+          <header class="playground-pane-header">
+            <p class="playground-pane-title">Zone Diagram</p>
+          </header>
+          <div class="playground-pane-body" data-role="playground-zones"></div>
+        </section>
+        <section class="playground-pane playground-pane-terminal">
+          <header class="playground-pane-header">
+            <p class="playground-pane-title">Terminal</p>
+          </header>
+          <div class="playground-pane-body playground-terminal-body" data-role="playground-terminal"></div>
+        </section>
+      </div>
+    </div>
+  `;
+
+  const zonesMount = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="playground-zones"]'));
+  const terminalMount = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="playground-terminal"]'));
+  const resetButton = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="playground-reset"]'));
+
+  const eventName = `demo:${section.number}:command:submit`;
+  let state = createInitialState();
+
+  initZones(zonesMount, { title: "Zone Diagram" });
+  renderZones(state, zonesMount);
+
+  const terminal = initTerminal(terminalMount, {
+    eventName,
+    shellId: `terminal-${section.id}`,
+    sectionId: section.id,
+    autoFocus: true,
+    retainFocusOnBlur: false,
+    pathLabel: "gitvisual ~/playground",
+  });
+
+  terminal.clear();
+  terminal.print("Blank repo. Type anything.", "info");
+
+  const handler = (payload) => {
+    const rawInput = typeof payload === "string" ? payload : String(payload?.rawInput ?? "").trim();
+    const parsed = parseCommand(rawInput);
+
+    if (!parsed.ok) {
+      terminal.print(`\u2717 ${parsed.reason}`, "error");
+      return;
+    }
+
+    const result = runCommand(state, rawInput);
+    if (result.error) {
+      terminal.print(`\u2717 ${result.error.message ?? "Command failed."}`, "error");
+      return;
+    }
+
+    state = result.nextState;
+    renderZones(state, zonesMount);
+
+    if (parsed.command === "stash:list") {
+      if (state.stash.length === 0) {
+        terminal.print("stash list is empty", "info");
+      } else {
+        state.stash.forEach((entry) => terminal.print(`${entry.id}: ${entry.message}`, "info"));
+      }
+    } else {
+      terminal.print(formatSuccess(parsed, result), "success");
+    }
+
+    emit(`demo:${section.number}:state:changed`, {
+      sectionId: section.id,
+      prevState: result.prevState,
+      nextState: result.nextState,
+      hints: result.animationHints,
+    });
+  };
+
+  on(eventName, handler);
+
+  const reset = () => {
+    state = createInitialState();
+    terminal.clear();
+    terminal.print("Blank repo. Type anything.", "info");
+    renderZones(state, zonesMount);
+  };
+
+  resetButton.addEventListener("click", reset);
+
+  demoControllers.set(section.id, {
+    reset,
+    dispose() {
+      off(eventName, handler);
+      resetButton.removeEventListener("click", reset);
     },
   });
 }
@@ -990,9 +2512,6 @@ function mountInteractiveSection(section) {
 
   initZones(zonesMount, { title: "Zone Diagram" });
   renderZones(state, zonesMount);
-  if (section.id === "playground") {
-    renderCommitGraph(state);
-  }
 
   const terminal = initTerminal(terminalMount, {
     eventName,
@@ -1030,9 +2549,6 @@ function mountInteractiveSection(section) {
       hints: result.animationHints,
     });
 
-    if (section.id === "playground") {
-      renderCommitGraph(state);
-    }
   };
 
   on(eventName, handler);
@@ -1042,9 +2558,6 @@ function mountInteractiveSection(section) {
     terminal.clear();
     terminal.print(`${section.heading} demo reset.`, "info");
     renderZones(state, zonesMount);
-    if (section.id === "playground") {
-      renderCommitGraph(state);
-    }
   };
 
   resetButton.addEventListener("click", reset);
@@ -1145,6 +2658,26 @@ export function initSections() {
 
     if (section.layout === "graph-focused") {
       mountGraphFocusedSection(section);
+      continue;
+    }
+
+    if (section.layout === "split-sync-world") {
+      mountSplitSyncWorldSection(section);
+      continue;
+    }
+
+    if (section.layout === "timeline-undo") {
+      mountTimelineUndoSection(section);
+      continue;
+    }
+
+    if (section.layout === "stash-shelf") {
+      mountStashShelfSection(section);
+      continue;
+    }
+
+    if (section.layout === "workspace-playground") {
+      mountWorkspacePlaygroundSection(section);
       continue;
     }
 

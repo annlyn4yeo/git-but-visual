@@ -23,6 +23,15 @@
   color: var(--text-primary);
 }
 
+.sidebar-logo-short {
+  display: none;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  letter-spacing: calc(var(--space-1) / 3);
+  color: var(--text-primary);
+}
+
 .sidebar-logo-accent,
 .sidebar-logo-accent em {
   color: var(--color-green);
@@ -106,6 +115,20 @@
   color: var(--color-green);
 }
 
+.sidebar-nav-item.is-complete .sidebar-nav-number {
+  color: rgba(31, 217, 139, 0.9);
+}
+
+.sidebar-nav-item.is-complete .sidebar-nav-number::after {
+  content: " \2713";
+  font-size: 11px;
+  color: rgba(31, 217, 139, 0.85);
+}
+
+.sidebar-nav-item.is-active.is-complete .sidebar-nav-number {
+  color: var(--color-green);
+}
+
 .sidebar-nav-label {
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
@@ -148,6 +171,73 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
   font-weight: 600;
+}
+
+#app.is-playground-focus #sidebar {
+  overflow-x: hidden;
+}
+
+#app.is-playground-focus .sidebar-shell {
+  align-items: center;
+}
+
+#app.is-playground-focus .sidebar-logo {
+  display: none;
+}
+
+#app.is-playground-focus .sidebar-logo-short {
+  display: block;
+}
+
+#app.is-playground-focus .sidebar-tagline,
+#app.is-playground-focus .sidebar-group-title,
+#app.is-playground-focus .sidebar-nav-label,
+#app.is-playground-focus .sidebar-playground-label {
+  display: none;
+}
+
+#app.is-playground-focus .sidebar-nav {
+  width: 100%;
+}
+
+#app.is-playground-focus .sidebar-group-items {
+  justify-items: center;
+}
+
+#app.is-playground-focus .sidebar-nav-item {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  width: 44px;
+  min-height: 34px;
+  padding: var(--space-2);
+}
+
+#app.is-playground-focus .sidebar-nav-number {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  color: transparent;
+  font-size: 0;
+}
+
+#app.is-playground-focus .sidebar-nav-item.is-active .sidebar-nav-number {
+  background: var(--color-green);
+}
+
+#app.is-playground-focus .sidebar-nav-item.is-complete .sidebar-nav-number {
+  background: rgba(31, 217, 139, 0.52);
+}
+
+#app.is-playground-focus .sidebar-nav-item.is-active.is-complete .sidebar-nav-number {
+  background: var(--color-green);
+}
+
+#app.is-playground-focus .sidebar-playground {
+  width: 44px;
+  min-height: 40px;
+  justify-content: center;
+  padding: var(--space-2);
 }
 
 .zones-section {

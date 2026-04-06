@@ -33,6 +33,7 @@ function createOutputLine(text, type) {
  *   shellId?: string,
  *   sectionId?: string,
  *   autoFocus?: boolean,
+ *   retainFocusOnBlur?: boolean,
  *   pathLabel?: string,
  * }} [options]
  * @returns {{
@@ -59,6 +60,7 @@ export function initTerminal(containerEl, options = {}) {
     shellId = "",
     sectionId = "",
     autoFocus = true,
+    retainFocusOnBlur = true,
     pathLabel = "gitvisual ~/my-project",
   } = options;
 
@@ -196,11 +198,13 @@ export function initTerminal(containerEl, options = {}) {
     api.focus();
   });
 
-  inputEl.addEventListener("blur", () => {
-    requestAnimationFrame(() => {
-      api.focus();
+  if (retainFocusOnBlur) {
+    inputEl.addEventListener("blur", () => {
+      requestAnimationFrame(() => {
+        api.focus();
+      });
     });
-  });
+  }
 
   if (autoFocus) {
     api.focus();

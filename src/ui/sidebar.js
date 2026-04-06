@@ -1,3 +1,5 @@
+import { on, off } from "../utils/events.js";
+
 const SIDEBAR_SECTIONS = [
   {
     title: "Concepts",
@@ -27,6 +29,8 @@ const PLAYGROUND_ITEM = {
   sectionId: "playground",
   label: "Playground (free sandbox)",
 };
+const COMPLETION_STORAGE_KEY = "gitvisual:section-completions:v1";
+let completionListener = null;
 
 function renderSidebarMarkup() {
   const sectionGroups = SIDEBAR_SECTIONS.map((group) => {
@@ -57,6 +61,7 @@ function renderSidebarMarkup() {
         <h1 class="sidebar-logo">
           Git<span class="sidebar-logo-accent"><em>Visual</em></span>
         </h1>
+        <p class="sidebar-logo-short" aria-hidden="true">GV</p>
         <p class="sidebar-tagline">Learn git by seeing it</p>
       </header>
 
@@ -97,6 +102,74 @@ function scrollToSection(sectionId) {
   mainPanel.scrollTo({ top, behavior: "smooth" });
 }
 
+function setSidebarCollapsedBySection(sectionId) {
+  const app = document.getElementById("app");
+  if (!app) {
+    return;
+  }
+
+  app.classList.toggle("is-playground-focus", sectionId === PLAYGROUND_ITEM.sectionId);
+}
+
+function readCompletionSet() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return new Set();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(COMPLETION_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((item) => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function applyCompletionState(sidebarEl) {
+  const completed = readCompletionSet();
+  const navItems = sidebarEl.querySelectorAll('[data-role="sidebar-nav-item"][data-section]');
+  navItems.forEach((itemEl) => {
+    const sectionId = itemEl.getAttribute("data-section");
+    const isComplete = Boolean(sectionId && sectionId !== "playground" && completed.has(sectionId));
+    itemEl.classList.toggle("is-complete", isComplete);
+  });
+}
+
+function getSectionClosestToViewportTop(mainPanel) {
+  const sectionEls = mainPanel.querySelectorAll("[data-section]");
+  if (sectionEls.length === 0) {
+    return null;
+  }
+
+  const panelRect = mainPanel.getBoundingClientRect();
+  const anchor = panelRect.top + Math.min(180, Math.max(120, panelRect.height * 0.22));
+
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  sectionEls.forEach((sectionEl) => {
+    const rect = sectionEl.getBoundingClientRect();
+    const inView = rect.bottom > panelRect.top && rect.top < panelRect.bottom;
+    if (!inView) {
+      return;
+    }
+
+    const distance = Math.abs(rect.top - anchor);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = sectionEl;
+    }
+  });
+
+  return best;
+}
+
 /**
  * Initialize sidebar UI.
  * @param {Element | null} [containerEl]
@@ -113,6 +186,26 @@ export function initSidebar(containerEl) {
   }
 
   resolvedContainer.innerHTML = renderSidebarMarkup();
+  applyCompletionState(resolvedContainer);
+
+  if (completionListener) {
+    off("section:completed", completionListener);
+    completionListener = null;
+  }
+
+  completionListener = (payload) => {
+    const sectionId = typeof payload?.sectionId === "string" ? payload.sectionId : "";
+    if (!sectionId || sectionId === "playground") {
+      return;
+    }
+    const navItem = resolvedContainer.querySelector(
+      `[data-role="sidebar-nav-item"][data-section="${sectionId}"]`,
+    );
+    if (navItem instanceof HTMLElement) {
+      navItem.classList.add("is-complete");
+    }
+  };
+  on("section:completed", completionListener);
 
   const navItems = resolvedContainer.querySelectorAll(
     '[data-role="sidebar-nav-item"][data-section]',
@@ -125,11 +218,44 @@ export function initSidebar(containerEl) {
       }
 
       setActiveSection(sectionId);
+      setSidebarCollapsedBySection(sectionId);
       scrollToSection(sectionId);
     });
   });
 
-  setActiveSection(SIDEBAR_SECTIONS[0].items[0].sectionId);
+  const initialId = SIDEBAR_SECTIONS[0].items[0].sectionId;
+  setActiveSection(initialId);
+  setSidebarCollapsedBySection(initialId);
+
+  const mainPanel = getMainContentPanel();
+  if (mainPanel) {
+    let frame = 0;
+    const syncToScroll = () => {
+      frame = 0;
+      const activeEl = getSectionClosestToViewportTop(mainPanel);
+      if (!activeEl) {
+        return;
+      }
+
+      const sectionId = activeEl.getAttribute("data-section");
+      if (!sectionId) {
+        return;
+      }
+
+      setActiveSection(sectionId);
+      setSidebarCollapsedBySection(sectionId);
+    };
+
+    const onScroll = () => {
+      if (frame) {
+        return;
+      }
+      frame = window.requestAnimationFrame(syncToScroll);
+    };
+
+    mainPanel.addEventListener("scroll", onScroll, { passive: true });
+    syncToScroll();
+  }
 }
 
 /**

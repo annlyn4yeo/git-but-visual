@@ -1,8 +1,9 @@
 #app {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 320px;
+  grid-template-columns: 220px minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  transition: grid-template-columns var(--duration-slow) ease;
 }
 
 #sidebar {
@@ -15,8 +16,6 @@
   overflow-y: auto;
 }
 
-#right-panel {
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border-default);
-  overflow-y: auto;
+#app.is-playground-focus {
+  grid-template-columns: 78px minmax(0, 1fr);
 }
