@@ -3,10 +3,6 @@ import { emit } from "../utils/events.js";
 /** @type {null | { print: (text: string, type?: string) => void, printCommand: (input: string) => void, clear: () => void, focus: () => void, fillInput: (value: string) => void }} */
 let terminalApi = null;
 
-/** @type {string[]} */
-let commandHistory = [];
-let historyIndex = -1;
-
 /**
  * @param {HTMLElement} outputEl
  * @param {HTMLElement} lineEl
@@ -32,6 +28,13 @@ function createOutputLine(text, type) {
 /**
  * Initialize terminal UI.
  * @param {Element} containerEl
+ * @param {{
+ *   eventName?: string,
+ *   shellId?: string,
+ *   sectionId?: string,
+ *   autoFocus?: boolean,
+ *   pathLabel?: string,
+ * }} [options]
  * @returns {{
  *   print: (text: string, type?: string) => void,
  *   printCommand: (input: string) => void,
@@ -40,7 +43,7 @@ function createOutputLine(text, type) {
  *   fillInput: (value: string) => void
  * }}
  */
-export function initTerminal(containerEl) {
+export function initTerminal(containerEl, options = {}) {
   if (!containerEl || typeof document === "undefined") {
     return {
       print() {},
@@ -51,6 +54,18 @@ export function initTerminal(containerEl) {
     };
   }
 
+  const {
+    eventName = "command:submit",
+    shellId = "",
+    sectionId = "",
+    autoFocus = true,
+    pathLabel = "gitvisual ~/my-project",
+  } = options;
+
+  /** @type {string[]} */
+  let commandHistory = [];
+  let historyIndex = -1;
+
   const existing = containerEl.querySelector(".terminal-shell");
   if (existing) {
     existing.remove();
@@ -58,8 +73,12 @@ export function initTerminal(containerEl) {
 
   const shell = document.createElement("section");
   shell.className = "terminal-shell";
-  shell.id = "saving-changes";
-  shell.setAttribute("data-section", "saving-changes");
+  if (shellId) {
+    shell.id = shellId;
+  }
+  if (sectionId) {
+    shell.setAttribute("data-section", sectionId);
+  }
 
   shell.innerHTML = `
     <header class="terminal-header">
@@ -68,12 +87,12 @@ export function initTerminal(containerEl) {
         <span class="terminal-dot dot-yellow"></span>
         <span class="terminal-dot dot-green"></span>
       </div>
-      <p class="terminal-path">gitvisual ~/my-project</p>
+      <p class="terminal-path">${pathLabel}</p>
     </header>
     <div class="terminal-output" data-role="terminal-output"></div>
     <div class="terminal-input-row">
       <span class="terminal-prefix">git</span>
-      <span class="terminal-caret" aria-hidden="true">❯</span>
+      <span class="terminal-caret" aria-hidden="true">\u276f</span>
       <input class="terminal-input" data-role="terminal-input" type="text" spellcheck="false" autocomplete="off" />
     </div>
   `;
@@ -98,7 +117,7 @@ export function initTerminal(containerEl) {
     printCommand(input) {
       const line = document.createElement("div");
       line.className = "terminal-line terminal-line-command";
-      line.innerHTML = `<span class="terminal-command-prompt">?</span><span class="terminal-command-text">${input}</span>`;
+      line.innerHTML = `<span class="terminal-command-prompt">\u276f</span><span class="terminal-command-text">${input}</span>`;
       appendLine(outputEl, line);
     },
 
@@ -138,7 +157,7 @@ export function initTerminal(containerEl) {
       }
       historyIndex = commandHistory.length;
 
-      emit("command:submit", raw);
+      emit(eventName, { rawInput: raw, sectionId });
 
       inputEl.value = "";
       api.focus();
@@ -183,7 +202,10 @@ export function initTerminal(containerEl) {
     });
   });
 
-  api.focus();
+  if (autoFocus) {
+    api.focus();
+  }
+
   terminalApi = api;
   return api;
 }
