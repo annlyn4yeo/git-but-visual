@@ -32,7 +32,6 @@ const HINT_ANIMATORS = Object.freeze({
   },
   STASH_PUSHED: (hint, context) => stash.animateStash(context.fileEls ?? [], context.stashBoxEl ?? null),
   STASH_POPPED: (hint, context) => stash.animateStashPop(context.stashBoxEl ?? null, context.targetZoneEl ?? null),
-  RESET_PERFORMED: (hint, context) => undo.animateReset(hint.mode, context.affectedEls ?? []),
 });
 
 /**
@@ -108,6 +107,32 @@ export async function runAnimationHints(hints, context = {}) {
       await asAnimationPromise(commitTimeline);
     }
 
+    const branchHints = hintList.filter((hint) =>
+      ["BRANCH_CREATED", "BRANCH_SWITCHED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
+    );
+    if (branchHints.some((hint) => hint?.type === "BRANCH_CREATED" || hint?.type === "BRANCH_SWITCHED")) {
+      const branchTimeline = commitGraph.animateBranchingSequence(branchHints, {
+        root: document,
+        gsap,
+        storeTimeline,
+        command: typeof context.command === "string" ? context.command : "",
+      });
+      await asAnimationPromise(branchTimeline);
+    }
+
+    const mergeHints = hintList.filter((hint) =>
+      ["FAST_FORWARD", "MERGE_COMMIT", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
+    );
+    if (mergeHints.some((hint) => hint?.type === "FAST_FORWARD" || hint?.type === "MERGE_COMMIT")) {
+      const mergeTimeline = commitGraph.animateMergeSequence(mergeHints, {
+        root: document,
+        gsap,
+        storeTimeline,
+        command: typeof context.command === "string" ? context.command : "",
+      });
+      await asAnimationPromise(mergeTimeline);
+    }
+
     const syncHints = hintList.filter((hint) =>
       ["SYNC_PULSE", "TRACKING_UPDATED", "REMOTE_UPDATED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
     );
@@ -125,13 +150,31 @@ export async function runAnimationHints(hints, context = {}) {
       await asAnimationPromise(syncTimeline);
     }
 
+    const resetHints = hintList.filter((hint) =>
+      ["RESET_PERFORMED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
+    );
+    if (resetHints.some((hint) => hint?.type === "RESET_PERFORMED")) {
+      const resetTimeline = undo.animateResetSequence(resetHints, {
+        root: document,
+        gsap,
+        storeTimeline,
+        command: typeof context.command === "string" ? context.command : "",
+      });
+      await asAnimationPromise(resetTimeline);
+    }
+
     for (const hint of hintList) {
       const hintType = typeof hint?.type === "string" ? hint.type : "";
       if (
         hintType === "FILE_MOVED" ||
         hintType === "COMMIT_CREATED" ||
         hintType === "STAGING_CLEARED" ||
-        hintType === "SYNC_PULSE"
+        hintType === "BRANCH_CREATED" ||
+        hintType === "BRANCH_SWITCHED" ||
+        hintType === "FAST_FORWARD" ||
+        hintType === "MERGE_COMMIT" ||
+        hintType === "SYNC_PULSE" ||
+        hintType === "RESET_PERFORMED"
       ) {
         continue;
       }
