@@ -254,6 +254,42 @@ function acknowledgeSectionCompletion(sectionId) {
 }
 
 /**
+ * Emit a state-change event and wait for the interceptor to finish.
+ * Falls back to immediate resolve when no interceptor is registered.
+ * @param {{
+ *   sectionId?: string,
+ *   command?: string,
+ *   prevState: import("../simulator/state.js").GitState,
+ *   nextState: import("../simulator/state.js").GitState,
+ *   hints: Array<{type: string} & Record<string, unknown>>,
+ *   zonesRoot?: ParentNode | null,
+ *   domRefs?: Record<string, unknown>,
+ * }} payload
+ * @returns {Promise<void>}
+ */
+function waitForStateChangeInterception(payload) {
+  return new Promise((resolve) => {
+    /** @type {Record<string, unknown>} */
+    const eventPayload = {
+      sectionId: payload.sectionId ?? "",
+      command: payload.command ?? "",
+      prevState: payload.prevState,
+      nextState: payload.nextState,
+      hints: payload.hints,
+      zonesRoot: payload.zonesRoot ?? null,
+      domRefs: payload.domRefs ?? {},
+      __handled: false,
+      resolve,
+    };
+
+    emit("state:changed", eventPayload);
+    if (eventPayload.__handled !== true) {
+      resolve();
+    }
+  });
+}
+
+/**
  * @param {string} tone
  * @returns {string}
  */
@@ -2438,7 +2474,7 @@ function mountWorkspacePlaygroundSection(section) {
   terminal.clear();
   terminal.print("Blank repo. Type anything.", "info");
 
-  const handler = (payload) => {
+  const handler = async (payload) => {
     const rawInput = typeof payload === "string" ? payload : String(payload?.rawInput ?? "").trim();
     const parsed = parseCommand(rawInput);
 
@@ -2454,7 +2490,14 @@ function mountWorkspacePlaygroundSection(section) {
     }
 
     state = result.nextState;
-    renderZones(state, zonesMount);
+    await waitForStateChangeInterception({
+      sectionId: section.id,
+      command: rawInput,
+      prevState: result.prevState,
+      nextState: result.nextState,
+      hints: result.animationHints,
+      zonesRoot: zonesMount,
+    });
 
     if (parsed.command === "stash:list") {
       if (state.stash.length === 0) {
@@ -2523,7 +2566,7 @@ function mountInteractiveSection(section) {
 
   terminal.print(`${section.heading} demo ready.`, "info");
 
-  const handler = (payload) => {
+  const handler = async (payload) => {
     const rawInput = typeof payload === "string" ? payload : String(payload?.rawInput ?? "").trim();
     const parsed = parseCommand(rawInput);
 
@@ -2539,7 +2582,14 @@ function mountInteractiveSection(section) {
     }
 
     state = result.nextState;
-    renderZones(state, zonesMount);
+    await waitForStateChangeInterception({
+      sectionId: section.id,
+      command: rawInput,
+      prevState: result.prevState,
+      nextState: result.nextState,
+      hints: result.animationHints,
+      zonesRoot: zonesMount,
+    });
     terminal.print(formatSuccess(parsed, result), "success");
 
     emit(`demo:${section.number}:state:changed`, {

@@ -317,6 +317,9 @@ export function renderCommitGraph(state) {
         "stroke-width": isSecondaryParent ? 1.5 : 2,
         fill: "none",
         "stroke-linecap": "round",
+        "data-role": "commit-edge",
+        "data-child-hash": commit.hash,
+        "data-parent-hash": parentHash,
       });
 
       if (isDangling) {
@@ -344,6 +347,8 @@ export function renderCommitGraph(state) {
         stroke: isDangling ? "var(--text-muted)" : getBranchColor(commit.branch),
         "stroke-width": 2,
         opacity: isDangling ? 0.65 : 1,
+        "data-role": "head-ring",
+        "data-commit-hash": commit.hash,
       });
     }
 
@@ -356,6 +361,8 @@ export function renderCommitGraph(state) {
       "stroke-width": isHead ? 2.5 : 2,
       opacity: isDangling ? 0.6 : 1,
       cursor: "pointer",
+      "data-role": "commit-node",
+      "data-commit-hash": commit.hash,
     });
 
     node.addEventListener("mouseenter", () => {
@@ -394,6 +401,9 @@ export function renderCommitGraph(state) {
         fill: getBranchDimColor(branchName),
         stroke: getBranchMutedColor(branchName),
         "stroke-width": 1,
+        "data-role": "branch-label-bg",
+        "data-branch-name": branchName,
+        "data-commit-hash": commit.hash,
       });
 
       createSvgElement(svg, "text", {
@@ -403,6 +413,9 @@ export function renderCommitGraph(state) {
         "font-family": "var(--font-mono)",
         "font-size": "10",
         "font-weight": "600",
+        "data-role": "branch-label-text",
+        "data-branch-name": branchName,
+        "data-commit-hash": commit.hash,
       }).textContent = branchName;
     }
 

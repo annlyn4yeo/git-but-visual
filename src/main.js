@@ -1,5 +1,8 @@
 import { initSidebar } from "./ui/sidebar.js";
 import { initSections } from "./ui/sections.js";
+import { renderZones } from "./ui/zones.js";
+import { renderCommitGraph } from "./ui/commit-graph.js";
+import { registerStateChangeInterceptor } from "./animations/index.js";
 
 let initialized = false;
 /** @type {{ sectionRefs: Map<string, {el: HTMLElement, demoEl: HTMLElement}>, resetDemo: (sectionId: string) => void } | null} */
@@ -24,6 +27,22 @@ export function init() {
   }
 
   initialized = true;
+  registerStateChangeInterceptor({
+    async onAfterAnimations(payload) {
+      const nextState = payload?.nextState ?? null;
+      if (!nextState) {
+        return;
+      }
+
+      const zonesRoot = payload?.zonesRoot ?? null;
+      if (zonesRoot) {
+        renderZones(nextState, zonesRoot);
+      }
+
+      renderCommitGraph(nextState);
+    },
+  });
+
   initSidebar();
   sectionsApi = initSections();
 }
