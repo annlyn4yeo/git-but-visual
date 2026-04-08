@@ -114,7 +114,10 @@ function getReachableHashes(state) {
  */
 function formatRelativeTime(timestamp) {
   const timestampMs = timestamp < 1000000000000 ? timestamp * 1000 : timestamp;
-  const diffSeconds = Math.max(1, Math.floor((Date.now() - timestampMs) / 1000));
+  const diffSeconds = Math.max(
+    1,
+    Math.floor((Date.now() - timestampMs) / 1000),
+  );
 
   if (diffSeconds < 60) {
     return `${diffSeconds} second(s) ago`;
@@ -164,7 +167,9 @@ function ensureGraphShell(rightPanel) {
 
   const svg = rightPanel.querySelector(".commit-graph-svg");
   const branchPillLabel = rightPanel.querySelector(".current-branch-label");
-  const branchPillSub = rightPanel.querySelector('[data-role="branch-pill-sub"]');
+  const branchPillSub = rightPanel.querySelector(
+    '[data-role="branch-pill-sub"]',
+  );
   const tooltip = rightPanel.querySelector('[data-role="commit-tooltip"]');
   if (!svg || !branchPillLabel || !branchPillSub || !tooltip) {
     return null;
@@ -289,7 +294,10 @@ export function renderCommitGraph(state) {
     });
   }
 
-  const width = Math.max(280, baseX + (branchLanes.size - 1) * trackOffset + 190);
+  const width = Math.max(
+    280,
+    baseX + (branchLanes.size - 1) * trackOffset + 190,
+  );
   const height = Math.max(320, commits.length * rowSpacing + 36);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
@@ -301,7 +309,11 @@ export function renderCommitGraph(state) {
 
     const isDangling = !reachableHashes.has(commit.hash);
 
-    for (let parentIndex = 0; parentIndex < commit.parents.length; parentIndex += 1) {
+    for (
+      let parentIndex = 0;
+      parentIndex < commit.parents.length;
+      parentIndex += 1
+    ) {
       const parentHash = commit.parents[parentIndex];
       const to = positionByHash.get(parentHash);
       if (!to) {
@@ -313,7 +325,9 @@ export function renderCommitGraph(state) {
         d: isSecondaryParent
           ? `M ${from.x} ${from.y} C ${from.x} ${from.y + 20}, ${to.x} ${to.y - 20}, ${to.x} ${to.y}`
           : `M ${from.x} ${from.y} L ${to.x} ${to.y}`,
-        stroke: isDangling ? "var(--border-default)" : getBranchMutedColor(isSecondaryParent ? to.branch : commit.branch),
+        stroke: isDangling
+          ? "var(--border-default)"
+          : getBranchMutedColor(isSecondaryParent ? to.branch : commit.branch),
         "stroke-width": isSecondaryParent ? 1.5 : 2,
         fill: "none",
         "stroke-linecap": "round",
@@ -344,7 +358,9 @@ export function renderCommitGraph(state) {
         cy: point.y,
         r: 10,
         fill: "none",
-        stroke: isDangling ? "var(--text-muted)" : getBranchColor(commit.branch),
+        stroke: isDangling
+          ? "var(--text-muted)"
+          : getBranchColor(commit.branch),
         "stroke-width": 2,
         opacity: isDangling ? 0.65 : 1,
         "data-role": "head-ring",

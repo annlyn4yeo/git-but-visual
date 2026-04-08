@@ -32,7 +32,41 @@ const HINT_ANIMATORS = Object.freeze({
   },
   STASH_PUSHED: (hint, context) => stash.animateStash(context.fileEls ?? [], context.stashBoxEl ?? null),
   STASH_POPPED: (hint, context) => stash.animateStashPop(context.stashBoxEl ?? null, context.targetZoneEl ?? null),
+  STASH_APPLIED: (hint, context) => stash.animateStashApply(context.stashBoxEl ?? null, context.targetZoneEl ?? null),
 });
+
+/**
+ * @param {Array<{type?: string, mode?: string} & Record<string, unknown>>} resetHints
+ * @param {Record<string, unknown>} context
+ * @returns {unknown}
+ */
+function dispatchResetAnimationByMode(resetHints, context) {
+  const resetHint = resetHints.find((hint) => hint?.type === "RESET_PERFORMED");
+  if (!resetHint) {
+    return null;
+  }
+
+  const options = {
+    root: document,
+    zonesRoot:
+      context.zonesRoot && typeof context.zonesRoot.querySelector === "function"
+        ? context.zonesRoot
+        : document,
+    gsap,
+    storeTimeline,
+    getTimeline,
+    command: typeof context.command === "string" ? context.command : "",
+  };
+
+  switch (resetHint.mode) {
+    case "soft":
+    case "mixed":
+    case "hard":
+      return undo.animateResetSequence(resetHints, options);
+    default:
+      return null;
+  }
+}
 
 /**
  * @param {unknown} timeline
@@ -72,6 +106,8 @@ export async function runAnimationHints(hints, context = {}) {
   gsap.globalTimeline.timeScale(Math.max(0.01, animationSpeedMultiplier));
 
   try {
+    const hasRevertHint = hintList.some((hint) => hint?.type === "REVERT_COMMIT");
+
     const fileMoveHints = hintList.filter(
       (hint) =>
         hint?.type === "FILE_MOVED" &&
@@ -91,10 +127,23 @@ export async function runAnimationHints(hints, context = {}) {
       await asAnimationPromise(fileMoveTimeline);
     }
 
+    const revertHints = hintList.filter((hint) =>
+      ["REVERT_COMMIT", "COMMIT_CREATED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
+    );
+    if (hasRevertHint) {
+      const revertTimeline = undo.animateRevertSequence(revertHints, {
+        root: document,
+        gsap,
+        storeTimeline,
+        command: typeof context.command === "string" ? context.command : "",
+      });
+      await asAnimationPromise(revertTimeline);
+    }
+
     const commitHints = hintList.filter((hint) =>
       ["COMMIT_CREATED", "STAGING_CLEARED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
     );
-    if (commitHints.some((hint) => hint?.type === "COMMIT_CREATED")) {
+    if (!hasRevertHint && commitHints.some((hint) => hint?.type === "COMMIT_CREATED")) {
       const commitTimeline = commitGraph.animateCommitSequence(commitHints, {
         root: document,
         zonesRoot:
@@ -151,19 +200,10 @@ export async function runAnimationHints(hints, context = {}) {
     }
 
     const resetHints = hintList.filter((hint) =>
-      ["RESET_PERFORMED", "HEAD_MOVED"].includes(String(hint?.type ?? "")),
+      ["RESET_PERFORMED", "HEAD_MOVED", "FILES_RETURNED"].includes(String(hint?.type ?? "")),
     );
     if (resetHints.some((hint) => hint?.type === "RESET_PERFORMED")) {
-      const resetTimeline = undo.animateResetSequence(resetHints, {
-        root: document,
-        zonesRoot:
-          context.zonesRoot && typeof context.zonesRoot.querySelector === "function"
-            ? context.zonesRoot
-            : document,
-        gsap,
-        storeTimeline,
-        command: typeof context.command === "string" ? context.command : "",
-      });
+      const resetTimeline = dispatchResetAnimationByMode(resetHints, context);
       await asAnimationPromise(resetTimeline);
     }
 
@@ -178,7 +218,8 @@ export async function runAnimationHints(hints, context = {}) {
         hintType === "FAST_FORWARD" ||
         hintType === "MERGE_COMMIT" ||
         hintType === "SYNC_PULSE" ||
-        hintType === "RESET_PERFORMED"
+        hintType === "RESET_PERFORMED" ||
+        hintType === "REVERT_COMMIT"
       ) {
         continue;
       }

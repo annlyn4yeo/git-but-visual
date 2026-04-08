@@ -108,7 +108,10 @@ function setSidebarCollapsedBySection(sectionId) {
     return;
   }
 
-  app.classList.toggle("is-playground-focus", sectionId === PLAYGROUND_ITEM.sectionId);
+  app.classList.toggle(
+    "is-playground-focus",
+    sectionId === PLAYGROUND_ITEM.sectionId,
+  );
 }
 
 function readCompletionSet() {
@@ -133,10 +136,14 @@ function readCompletionSet() {
 
 function applyCompletionState(sidebarEl) {
   const completed = readCompletionSet();
-  const navItems = sidebarEl.querySelectorAll('[data-role="sidebar-nav-item"][data-section]');
+  const navItems = sidebarEl.querySelectorAll(
+    '[data-role="sidebar-nav-item"][data-section]',
+  );
   navItems.forEach((itemEl) => {
     const sectionId = itemEl.getAttribute("data-section");
-    const isComplete = Boolean(sectionId && sectionId !== "playground" && completed.has(sectionId));
+    const isComplete = Boolean(
+      sectionId && sectionId !== "playground" && completed.has(sectionId),
+    );
     itemEl.classList.toggle("is-complete", isComplete);
   });
 }
@@ -148,7 +155,8 @@ function getSectionClosestToViewportTop(mainPanel) {
   }
 
   const panelRect = mainPanel.getBoundingClientRect();
-  const anchor = panelRect.top + Math.min(180, Math.max(120, panelRect.height * 0.22));
+  const anchor =
+    panelRect.top + Math.min(180, Math.max(120, panelRect.height * 0.22));
 
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -194,7 +202,8 @@ export function initSidebar(containerEl) {
   }
 
   completionListener = (payload) => {
-    const sectionId = typeof payload?.sectionId === "string" ? payload.sectionId : "";
+    const sectionId =
+      typeof payload?.sectionId === "string" ? payload.sectionId : "";
     if (!sectionId || sectionId === "playground") {
       return;
     }

@@ -116,16 +116,22 @@
 }
 
 .sidebar-nav-item.is-complete .sidebar-nav-number {
-  color: rgba(31, 217, 139, 0.9);
+  position: relative;
+  color: transparent;
+  font-size: 0;
 }
 
 .sidebar-nav-item.is-complete .sidebar-nav-number::after {
-  content: " \2713";
+  content: "\2713";
   font-size: 11px;
   color: rgba(31, 217, 139, 0.85);
 }
 
 .sidebar-nav-item.is-active.is-complete .sidebar-nav-number {
+  color: transparent;
+}
+
+.sidebar-nav-item.is-active.is-complete .sidebar-nav-number::after {
   color: var(--color-green);
 }
 
@@ -226,11 +232,26 @@
 }
 
 #app.is-playground-focus .sidebar-nav-item.is-complete .sidebar-nav-number {
-  background: rgba(31, 217, 139, 0.52);
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
 }
 
 #app.is-playground-focus .sidebar-nav-item.is-active.is-complete .sidebar-nav-number {
-  background: var(--color-green);
+  background: transparent;
+}
+
+#app.is-playground-focus .sidebar-nav-item.is-complete .sidebar-nav-number::after {
+  content: "\2713";
+  font-size: 12px;
+  color: rgba(31, 217, 139, 0.85);
+}
+
+#app.is-playground-focus .sidebar-nav-item.is-active.is-complete .sidebar-nav-number::after {
+  color: var(--color-green);
 }
 
 #app.is-playground-focus .sidebar-playground {

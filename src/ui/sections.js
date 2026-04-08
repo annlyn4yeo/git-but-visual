@@ -2694,6 +2694,14 @@ export function initSections() {
   }
 
   mainContent.appendChild(fragment);
+  // Always start from the first lesson on reload; do not restore prior scroll
+  // position (which can reopen directly on Playground).
+  mainContent.scrollTop = 0;
+  if (typeof window !== "undefined") {
+    window.requestAnimationFrame(() => {
+      mainContent.scrollTop = 0;
+    });
+  }
 
   for (const section of SECTIONS) {
     if (section.layout === "orientation") {
