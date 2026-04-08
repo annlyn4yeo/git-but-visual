@@ -156,6 +156,10 @@ export async function runAnimationHints(hints, context = {}) {
     if (resetHints.some((hint) => hint?.type === "RESET_PERFORMED")) {
       const resetTimeline = undo.animateResetSequence(resetHints, {
         root: document,
+        zonesRoot:
+          context.zonesRoot && typeof context.zonesRoot.querySelector === "function"
+            ? context.zonesRoot
+            : document,
         gsap,
         storeTimeline,
         command: typeof context.command === "string" ? context.command : "",

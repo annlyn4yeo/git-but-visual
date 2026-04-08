@@ -392,6 +392,16 @@
   will-change: transform, opacity;
 }
 
+.reset-mixed-return-ghost {
+  position: fixed;
+  z-index: 1260;
+  margin: 0;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+  will-change: transform, opacity;
+}
+
 .zone-working .zone-file-card {
   border-color: var(--color-amber-border);
 }
