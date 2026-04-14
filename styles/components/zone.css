@@ -3,10 +3,27 @@
 }
 
 .sidebar-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 100%;
   gap: var(--space-5);
+}
+
+.sidebar-active-rail {
+  position: absolute;
+  left: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--color-green);
+  box-shadow: 0 0 10px rgba(31, 217, 139, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    top 220ms ease,
+    height 220ms ease,
+    opacity 180ms ease;
+  z-index: 2;
 }
 
 .sidebar-logo-block {
@@ -99,7 +116,7 @@
 }
 
 .sidebar-nav-item.is-active {
-  border-left-color: var(--color-green);
+  border-left-color: transparent;
   background: var(--color-green-dim);
   color: var(--text-primary);
 }

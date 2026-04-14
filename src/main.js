@@ -2,7 +2,12 @@ import { initSidebar } from "./ui/sidebar.js";
 import { initSections } from "./ui/sections.js";
 import { renderZones } from "./ui/zones.js";
 import { renderCommitGraph } from "./ui/commit-graph.js";
-import { registerStateChangeInterceptor } from "./animations/index.js";
+import {
+  registerStateChangeInterceptor,
+  initSectionEntranceAnimations,
+  initSidebarScrollSync,
+  refreshSectionEntranceAnimations,
+} from "./animations/index.js";
 
 let initialized = false;
 /** @type {{ sectionRefs: Map<string, {el: HTMLElement, demoEl: HTMLElement}>, resetDemo: (sectionId: string) => void } | null} */
@@ -45,6 +50,14 @@ export function init() {
 
   initSidebar();
   sectionsApi = initSections();
+  initSectionEntranceAnimations(sectionsApi?.sectionRefs ?? null);
+  initSidebarScrollSync(sectionsApi?.sectionRefs ?? null);
+  refreshSectionEntranceAnimations();
+  if (typeof window !== "undefined") {
+    window.requestAnimationFrame(() => {
+      refreshSectionEntranceAnimations();
+    });
+  }
 }
 
 init();

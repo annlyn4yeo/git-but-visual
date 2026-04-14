@@ -2,6 +2,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { MotionPathPlugin } from "gsap/MotionPathPlugin";
 import { on, off } from "../utils/events.js";
+import { setActiveSection } from "../ui/sidebar.js";
 import * as fileFlight from "./file-flight.js";
 import * as commitGraph from "./commit-graph.js";
 import * as syncPulse from "./sync-pulse.js";
@@ -15,9 +16,50 @@ gsap.registerPlugin(ScrollTrigger, MotionPathPlugin, DrawSVGPlugin);
 
 /** @type {Map<string, unknown>} */
 const timelineRegistry = new Map();
+/** @type {Map<string, {entrance?: import("gsap/ScrollTrigger").ScrollTrigger, pin?: import("gsap/ScrollTrigger").ScrollTrigger}>} */
+const sectionTriggerRegistry = new Map();
+/** @type {Map<string, import("gsap/ScrollTrigger").ScrollTrigger>} */
+const sidebarScrollTriggerRegistry = new Map();
+/** @type {Map<string, ResizeObserver>} */
+const sectionResizeObservers = new Map();
+const HERO_ORIENTATION_PLAYED_KEY = "gitvisual:hero-orientation-played:v1";
 let animationSpeedMultiplier = 1;
 /** @type {(payload: any) => void | Promise<void> | null} */
 let stateChangedListener = null;
+let refreshFrame = 0;
+/** @type {import("gsap").GSAPTween | null} */
+let appLayoutTween = null;
+let playgroundShellCollapsed = false;
+
+/**
+ * @returns {boolean}
+ */
+function hasPlayedOrientationHeroThisSession() {
+  if (typeof window === "undefined" || !window.sessionStorage) {
+    return false;
+  }
+
+  try {
+    return window.sessionStorage.getItem(HERO_ORIENTATION_PLAYED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @returns {void}
+ */
+function markOrientationHeroPlayedThisSession() {
+  if (typeof window === "undefined" || !window.sessionStorage) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(HERO_ORIENTATION_PLAYED_KEY, "1");
+  } catch {
+    // Ignore storage errors.
+  }
+}
 
 const HINT_ANIMATORS = Object.freeze({
   COMMIT_CREATED: (hint) => commitGraph.animateNewCommit(hint, null),
@@ -89,6 +131,359 @@ function asAnimationPromise(timeline) {
   }
 
   return Promise.resolve();
+}
+
+/**
+ * @returns {void}
+ */
+function scheduleScrollRefresh() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (refreshFrame) {
+    window.cancelAnimationFrame(refreshFrame);
+  }
+
+  refreshFrame = window.requestAnimationFrame(() => {
+    refreshFrame = 0;
+    ScrollTrigger.refresh();
+  });
+}
+
+/**
+ * @returns {void}
+ */
+function disposeSectionScrollAnimations() {
+  sectionTriggerRegistry.forEach((entry) => {
+    entry.entrance?.kill();
+    entry.pin?.kill();
+  });
+  sectionTriggerRegistry.clear();
+
+  sectionResizeObservers.forEach((observer) => observer.disconnect());
+  sectionResizeObservers.clear();
+}
+
+/**
+ * @returns {void}
+ */
+function disposeSidebarScrollSync() {
+  sidebarScrollTriggerRegistry.forEach((trigger) => trigger.kill());
+  sidebarScrollTriggerRegistry.clear();
+}
+
+/**
+ * @param {boolean} collapsed
+ * @param {{immediate?: boolean}} [options]
+ * @returns {void}
+ */
+function animatePlaygroundShell(collapsed, options = {}) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (!options.immediate && playgroundShellCollapsed === collapsed) {
+    return;
+  }
+
+  const app = document.getElementById("app");
+  if (!(app instanceof HTMLElement)) {
+    return;
+  }
+
+  const targetColumns = collapsed ? "78px minmax(0, 1fr)" : "220px minmax(0, 1fr)";
+  playgroundShellCollapsed = collapsed;
+
+  if (appLayoutTween) {
+    appLayoutTween.kill();
+    appLayoutTween = null;
+  }
+
+  if (collapsed) {
+    app.classList.add("is-playground-focus");
+  } else {
+    app.classList.remove("is-playground-focus");
+  }
+
+  if (options.immediate) {
+    gsap.set(app, { gridTemplateColumns: targetColumns });
+    return;
+  }
+
+  appLayoutTween = gsap.to(app, {
+    duration: 0.4,
+    ease: "power2.inOut",
+    gridTemplateColumns: targetColumns,
+    overwrite: "auto",
+    onComplete: () => {
+      appLayoutTween = null;
+    },
+  });
+}
+
+/**
+ * @param {HTMLElement | null | undefined} sectionEl
+ * @returns {void}
+ */
+function runOrientationHeroEntrance(sectionEl) {
+  if (!(sectionEl instanceof HTMLElement)) {
+    return;
+  }
+
+  const zoneEls = Array.from(sectionEl.querySelectorAll(".orientation-zone")).filter(
+    (el) => el instanceof HTMLElement,
+  );
+  const flowPaths = Array.from(sectionEl.querySelectorAll(".orientation-flow-path")).filter(
+    (el) => el instanceof SVGPathElement,
+  );
+  if (zoneEls.length === 0) {
+    return;
+  }
+
+  const applyFlowReadyState = () => {
+    flowPaths.forEach((path) => {
+      const length = path.getTotalLength();
+      path.setAttribute("stroke-dasharray", String(length));
+      path.setAttribute("stroke-dashoffset", "0");
+    });
+    if (flowPaths.length > 0) {
+      gsap.set(flowPaths, { autoAlpha: 1, drawSVG: "0% 100%" });
+    }
+  };
+
+  if (hasPlayedOrientationHeroThisSession()) {
+    gsap.set(zoneEls, { autoAlpha: 1, y: 0 });
+    applyFlowReadyState();
+    return;
+  }
+
+  gsap.set(zoneEls, { autoAlpha: 0, y: 22 });
+  flowPaths.forEach((path) => {
+    const length = path.getTotalLength();
+    path.setAttribute("stroke-dasharray", String(length));
+    path.setAttribute("stroke-dashoffset", String(length));
+  });
+  if (flowPaths.length > 0) {
+    gsap.set(flowPaths, { autoAlpha: 1, drawSVG: "0% 0%" });
+  }
+
+  const timeline = gsap.timeline({
+    defaults: { ease: "power2.out" },
+    onComplete: () => {
+      markOrientationHeroPlayedThisSession();
+      scheduleScrollRefresh();
+    },
+  });
+
+  zoneEls.forEach((zoneEl, index) => {
+    timeline.to(
+      zoneEl,
+      {
+        autoAlpha: 1,
+        y: 0,
+        duration: 0.42,
+      },
+      index === 0 ? 0.06 : `>-0.12`,
+    );
+  });
+
+  flowPaths.forEach((path, index) => {
+    timeline.to(
+      path,
+      {
+        duration: 0.3,
+        ease: "none",
+        drawSVG: "0% 100%",
+        attr: { "stroke-dashoffset": 0 },
+      },
+      index === 0 ? ">-0.02" : ">-0.06",
+    );
+  });
+}
+
+/**
+ * @param {Map<string, {el: HTMLElement, demoEl: HTMLElement}> | null | undefined} sectionRefs
+ * @returns {void}
+ */
+export function initSectionEntranceAnimations(sectionRefs) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const mainScroller = document.getElementById("main-content");
+  if (!mainScroller) {
+    return;
+  }
+
+  disposeSectionScrollAnimations();
+  ScrollTrigger.defaults({ scroller: mainScroller });
+
+  const entries = sectionRefs instanceof Map ? [...sectionRefs.entries()] : [];
+  /** @type {HTMLElement | null} */
+  let heroSectionEl = null;
+  entries.forEach(([sectionId, refs], index) => {
+    if (!refs?.el || !(refs.el instanceof HTMLElement)) {
+      return;
+    }
+
+    const sectionEl = refs.el;
+    const isOrientationHero = sectionId === "the-four-zones";
+    const headerEl = sectionEl.querySelector(".lesson-header");
+    const numberEl = sectionEl.querySelector(".lesson-number");
+    const titleEl = sectionEl.querySelector(".lesson-title");
+    const bodyLines = Array.from(sectionEl.querySelectorAll(".lesson-copy"));
+    const demoEl = refs.demoEl instanceof HTMLElement ? refs.demoEl : sectionEl.querySelector('[data-role="demo-area"]');
+
+    let entrance;
+    if (isOrientationHero) {
+      heroSectionEl = sectionEl;
+      const heroVisibleTargets = [numberEl, titleEl, ...bodyLines, demoEl].filter(
+        (el) => el instanceof HTMLElement,
+      );
+      if (heroVisibleTargets.length > 0) {
+        gsap.set(heroVisibleTargets, { autoAlpha: 1, y: 0 });
+      }
+    } else {
+      const revealTargets = [numberEl, titleEl, ...bodyLines, demoEl].filter(
+        (el) => el instanceof HTMLElement,
+      );
+      if (revealTargets.length > 0) {
+        gsap.set(revealTargets, { autoAlpha: 0, y: 20 });
+      }
+
+      const timeline = gsap.timeline({
+        paused: true,
+        defaults: { ease: "power2.out" },
+      });
+      const headingTargets = [numberEl, titleEl].filter(
+        (el) => el instanceof HTMLElement,
+      );
+      if (headingTargets.length > 0) {
+        timeline.to(headingTargets, {
+          autoAlpha: 1,
+          y: 0,
+          duration: 0.42,
+          stagger: 0.08,
+        });
+      }
+
+      const bodyTargets = bodyLines.filter((el) => el instanceof HTMLElement);
+      if (bodyTargets.length > 0) {
+        timeline.to(
+          bodyTargets,
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.36,
+            stagger: 0.07,
+          },
+          headingTargets.length > 0 ? "-=0.06" : 0,
+        );
+      }
+
+      if (demoEl instanceof HTMLElement) {
+        timeline.to(
+          demoEl,
+          {
+            autoAlpha: 1,
+            y: 0,
+            duration: 0.46,
+          },
+          bodyTargets.length > 0 || headingTargets.length > 0 ? "-=0.05" : 0,
+        );
+      }
+
+      entrance = ScrollTrigger.create({
+        trigger: sectionEl,
+        start: "top 78%",
+        animation: timeline,
+        once: true,
+      });
+    }
+
+    let pin;
+    if (headerEl instanceof HTMLElement && index > 0) {
+      pin = ScrollTrigger.create({
+        trigger: sectionEl,
+        start: "top top+=72",
+        end: "+=44",
+        pin: headerEl,
+        pinSpacing: false,
+        anticipatePin: 1,
+        invalidateOnRefresh: true,
+      });
+    }
+
+    sectionTriggerRegistry.set(sectionId, { entrance, pin });
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => {
+        scheduleScrollRefresh();
+      });
+      observer.observe(sectionEl);
+      sectionResizeObservers.set(sectionId, observer);
+    }
+  });
+
+  runOrientationHeroEntrance(heroSectionEl);
+  scheduleScrollRefresh();
+}
+
+/**
+ * @returns {void}
+ */
+export function refreshSectionEntranceAnimations() {
+  scheduleScrollRefresh();
+}
+
+/**
+ * @param {Map<string, {el: HTMLElement, demoEl: HTMLElement}> | null | undefined} sectionRefs
+ * @returns {void}
+ */
+export function initSidebarScrollSync(sectionRefs) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const mainScroller = document.getElementById("main-content");
+  if (!mainScroller) {
+    return;
+  }
+
+  disposeSidebarScrollSync();
+  ScrollTrigger.defaults({ scroller: mainScroller });
+  animatePlaygroundShell(false, { immediate: true });
+
+  const entries = sectionRefs instanceof Map ? [...sectionRefs.entries()] : [];
+  entries.forEach(([sectionId, refs], index) => {
+    if (!refs?.el || !(refs.el instanceof HTMLElement)) {
+      return;
+    }
+
+    const previousSectionId = index > 0 ? entries[index - 1]?.[0] ?? sectionId : sectionId;
+    const trigger = ScrollTrigger.create({
+      trigger: refs.el,
+      start: "top 30%",
+      end: "bottom 30%",
+      onEnter: () => {
+        setActiveSection(sectionId);
+        animatePlaygroundShell(sectionId === "playground");
+      },
+      onEnterBack: () => {
+        setActiveSection(sectionId);
+        animatePlaygroundShell(sectionId === "playground");
+      },
+      onLeaveBack: () => {
+        setActiveSection(previousSectionId);
+        animatePlaygroundShell(previousSectionId === "playground");
+      },
+    });
+
+    sidebarScrollTriggerRegistry.set(sectionId, trigger);
+  });
+
+  scheduleScrollRefresh();
 }
 
 /**

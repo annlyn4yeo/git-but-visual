@@ -3,14 +3,26 @@ import { initTerminal } from "../terminal/index.js";
 import { createInitialState, runCommand } from "../simulator/index.js";
 import { emit, on, off } from "../utils/events.js";
 import { initZones, renderZones } from "./zones.js";
+import {
+  ScrollTrigger,
+  gsap,
+  setAnimationSpeedMultiplier,
+  getAnimationSpeedMultiplier,
+} from "../animations/index.js";
 
 /** @type {Map<string, {el: HTMLElement, demoEl: HTMLElement}>} */
 const sectionRefs = new Map();
-/** @type {Map<string, {reset: () => void, dispose: () => void}>} */
+/** @type {Map<string, {reset: () => void, dispose: () => void, suspend?: () => void}>} */
 const demoControllers = new Map();
 /** @type {Map<string, number>} */
 const nudgeTimeouts = new Map();
 const COMPLETION_STORAGE_KEY = "gitvisual:section-completions:v1";
+/** @type {IntersectionObserver | null} */
+let sectionMountObserver = null;
+/** @type {IntersectionObserver | null} */
+let sectionSuspendObserver = null;
+/** @type {Set<string>} */
+const mountedSectionIds = new Set();
 
 const SECTIONS = [
   {
@@ -290,11 +302,79 @@ function waitForStateChangeInterception(payload) {
 }
 
 /**
+ * @returns {void}
+ */
+function refreshScrollAfterMount() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    if (typeof ScrollTrigger?.refresh === "function") {
+      ScrollTrigger.refresh();
+    }
+  });
+}
+
+/**
  * @param {string} tone
  * @returns {string}
  */
 function chipToneClass(tone) {
   return `chip-tone-${tone}`;
+}
+
+/**
+ * @param {typeof SECTIONS[number]} section
+ * @returns {void}
+ */
+function mountSectionDemo(section) {
+  if (!section || mountedSectionIds.has(section.id)) {
+    return;
+  }
+
+  if (section.layout === "orientation") {
+    mountOrientationSection(section.id);
+  } else if (section.layout === "guided-save-workflow") {
+    mountGuidedSaveWorkflow(section.id);
+  } else if (section.layout === "graph-focused") {
+    mountGraphFocusedSection(section);
+  } else if (section.layout === "split-sync-world") {
+    mountSplitSyncWorldSection(section);
+  } else if (section.layout === "timeline-undo") {
+    mountTimelineUndoSection(section);
+  } else if (section.layout === "stash-shelf") {
+    mountStashShelfSection(section);
+  } else if (section.layout === "workspace-playground") {
+    mountWorkspacePlaygroundSection(section);
+  } else {
+    mountInteractiveSection(section);
+  }
+
+  mountedSectionIds.add(section.id);
+  refreshScrollAfterMount();
+}
+
+/**
+ * @param {string} sectionId
+ * @returns {void}
+ */
+function suspendSectionDemo(sectionId) {
+  if (!sectionId || !mountedSectionIds.has(sectionId)) {
+    return;
+  }
+
+  try {
+    if (gsap?.globalTimeline && typeof gsap.globalTimeline.progress === "function") {
+      gsap.globalTimeline.progress(1);
+    }
+  } catch {
+    // Ignore global animation completion failures.
+  }
+
+  const controller = demoControllers.get(sectionId);
+  if (controller && typeof controller.suspend === "function") {
+    controller.suspend();
+  }
 }
 
 /**
@@ -384,7 +464,11 @@ function mountOrientationSection(sectionId) {
           </div>
         </article>
 
-        <div class="orientation-flow" aria-hidden="true">\u2192</div>
+        <div class="orientation-flow" aria-hidden="true">
+          <svg class="orientation-flow-svg" viewBox="0 0 52 16" preserveAspectRatio="none" focusable="false">
+            <path class="orientation-flow-path" d="M 2 8 L 44 8 L 37 3 M 44 8 L 37 13"></path>
+          </svg>
+        </div>
 
         <article class="orientation-zone orientation-zone-staging" data-zone="staging-area" tabindex="0">
           <header class="orientation-zone-header">
@@ -399,7 +483,11 @@ function mountOrientationSection(sectionId) {
           </div>
         </article>
 
-        <div class="orientation-flow" aria-hidden="true">\u2192</div>
+        <div class="orientation-flow" aria-hidden="true">
+          <svg class="orientation-flow-svg" viewBox="0 0 52 16" preserveAspectRatio="none" focusable="false">
+            <path class="orientation-flow-path" d="M 2 8 L 44 8 L 37 3 M 44 8 L 37 13"></path>
+          </svg>
+        </div>
 
         <article class="orientation-zone orientation-zone-local" data-zone="local-repository" tabindex="0">
           <header class="orientation-zone-header">
@@ -414,7 +502,11 @@ function mountOrientationSection(sectionId) {
           </div>
         </article>
 
-        <div class="orientation-flow" aria-hidden="true">\u2192</div>
+        <div class="orientation-flow" aria-hidden="true">
+          <svg class="orientation-flow-svg" viewBox="0 0 52 16" preserveAspectRatio="none" focusable="false">
+            <path class="orientation-flow-path" d="M 2 8 L 44 8 L 37 3 M 44 8 L 37 13"></path>
+          </svg>
+        </div>
 
         <article class="orientation-zone orientation-zone-remote" data-zone="remote-repository" tabindex="0">
           <header class="orientation-zone-header">
@@ -510,25 +602,45 @@ function mountGuidedSaveWorkflow(sectionId) {
     return;
   }
 
-  const { demoEl } = refs;
+  const { demoEl, el: sectionEl } = refs;
   demoEl.innerHTML = `
-    <div class="guided-save-demo" data-role="guided-save-demo">
-      <ol class="guided-progress" data-role="guided-progress"></ol>
-      <div class="guided-step-card" data-role="guided-step-card">
-        <p class="guided-step-kicker" data-role="guided-step-kicker"></p>
-        <p class="guided-step-description" data-role="guided-step-description"></p>
-        <button class="command-chip" type="button" data-role="guided-step-action"></button>
+    <div class="guided-save-scrolly" data-role="guided-save-scrolly">
+      <div class="guided-scroll-copy" data-role="guided-scroll-copy">
+        <article class="guided-scroll-zone" data-role="guided-scroll-zone" data-step-index="0">
+          <p class="guided-scroll-kicker">Zone 1</p>
+          <h4 class="guided-scroll-title">git add</h4>
+          <p class="guided-scroll-description">Move chosen file changes from Working Directory into Staging.</p>
+        </article>
+        <article class="guided-scroll-zone" data-role="guided-scroll-zone" data-step-index="1">
+          <p class="guided-scroll-kicker">Zone 2</p>
+          <h4 class="guided-scroll-title">git commit</h4>
+          <p class="guided-scroll-description">Capture staged changes as a local snapshot in commit history.</p>
+        </article>
+        <article class="guided-scroll-zone" data-role="guided-scroll-zone" data-step-index="2">
+          <p class="guided-scroll-kicker">Zone 3</p>
+          <h4 class="guided-scroll-title">git push</h4>
+          <p class="guided-scroll-description">Send your local commit tip to the remote repository.</p>
+        </article>
       </div>
-      <div class="guided-complete-card" data-role="guided-complete" hidden>
-        <div class="guided-complete-glow" aria-hidden="true"></div>
-        <p class="guided-complete-title">Save Loop Complete</p>
-        <p class="guided-complete-copy">You moved changes through add, commit, and push in order. Ready to run it again?</p>
-        <button class="guided-complete-reset" type="button" data-role="guided-reset">Reset Walkthrough</button>
+      <div class="guided-save-sticky">
+        <div class="guided-save-demo" data-role="guided-save-demo">
+          <ol class="guided-progress" data-role="guided-progress"></ol>
+          <div class="guided-step-card" data-role="guided-step-card">
+            <p class="guided-step-kicker" data-role="guided-step-kicker"></p>
+            <p class="guided-step-description" data-role="guided-step-description"></p>
+            <button class="command-chip" type="button" data-role="guided-step-action"></button>
+          </div>
+          <div class="guided-save-zones" data-role="guided-save-zones"></div>
+        </div>
       </div>
-      <div class="guided-save-zones" data-role="guided-save-zones"></div>
     </div>
   `;
 
+  const scrollyEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-save-scrolly"]'));
+  const scrollyCopyEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-scroll-copy"]'));
+  const scrollZones = Array.from(
+    demoEl.querySelectorAll('[data-role="guided-scroll-zone"]'),
+  ).filter((el) => el instanceof HTMLElement);
   const progressEl = /** @type {HTMLOListElement} */ (demoEl.querySelector('[data-role="guided-progress"]'));
   const stepCardEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-step-card"]'));
   const stepKickerEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-step-kicker"]'));
@@ -536,13 +648,21 @@ function mountGuidedSaveWorkflow(sectionId) {
     demoEl.querySelector('[data-role="guided-step-description"]')
   );
   const stepActionEl = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="guided-step-action"]'));
-  const completeCardEl = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-complete"]'));
   const zonesMount = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="guided-save-zones"]'));
 
   let currentStepIndex = 0;
-  let state = createInitialState();
+  let highestSeenStep = 0;
   let completionDone = isSectionCompleted(sectionId);
   const zonesRoot = initZones(zonesMount, { title: "Zone Diagram" });
+  const mainScroller = document.getElementById("main-content");
+
+  const stepStates = (() => {
+    const initial = createInitialState();
+    const afterAdd = runCommandOrKeep(initial, "git add .");
+    const afterCommit = runCommandOrKeep(afterAdd, 'git commit -m "Save tracked updates"');
+    const afterPush = runCommandOrKeep(afterCommit, "git push");
+    return [afterAdd, afterCommit, afterPush];
+  })();
 
   /**
    * @returns {void}
@@ -586,103 +706,113 @@ function mountGuidedSaveWorkflow(sectionId) {
    */
   const renderStepState = () => {
     const activeStep = GUIDED_SAVE_STEPS[currentStepIndex];
-    const completedAll = currentStepIndex >= GUIDED_SAVE_STEPS.length;
-
-    if (completedAll) {
-      stepCardEl.hidden = true;
-      completeCardEl.hidden = false;
-      if (!completionDone) {
-        acknowledgeSectionCompletion(sectionId);
-        completionDone = true;
-      }
-      return;
-    }
-
     stepCardEl.hidden = false;
-    completeCardEl.hidden = true;
     stepKickerEl.textContent = `Step ${currentStepIndex + 1} of ${GUIDED_SAVE_STEPS.length} - ${activeStep.label}`;
     stepDescriptionEl.textContent = activeStep.description;
     stepActionEl.textContent = activeStep.label;
     stepActionEl.className = `command-chip ${chipToneClass(activeStep.tone)} guided-step-action`;
-    stepActionEl.disabled = false;
-  };
-
-  /**
-   * @returns {void}
-   */
-  const renderGuided = () => {
-    renderZones(state, zonesMount);
-    renderProgress();
-    renderStepState();
-    applyZoneFocus();
-  };
-
-  /**
-   * @returns {void}
-   */
-  const advanceStep = () => {
-    const activeStep = GUIDED_SAVE_STEPS[currentStepIndex];
-    if (!activeStep) {
-      return;
-    }
-
     stepActionEl.disabled = true;
-    const result = runCommand(state, activeStep.command);
-    if (result.error) {
-      stepActionEl.disabled = false;
-      return;
-    }
 
-    state = result.nextState;
-    currentStepIndex += 1;
-    renderGuided();
-
-    emit(`demo:02:state:changed`, {
-      sectionId: sectionId,
-      prevState: result.prevState,
-      nextState: result.nextState,
-      hints: result.animationHints,
+    scrollZones.forEach((zoneEl, index) => {
+      zoneEl.classList.toggle("is-active", index === currentStepIndex);
     });
   };
 
   /**
    * @returns {void}
    */
-  const reset = () => {
-    currentStepIndex = 0;
-    state = createInitialState();
+  const renderGuided = () => {
+    renderZones(stepStates[currentStepIndex] ?? stepStates[0], zonesMount);
+    renderProgress();
+    renderStepState();
+    applyZoneFocus();
+  };
+
+  /**
+   * @param {number} index
+   * @returns {void}
+   */
+  const setStepByScroll = (index) => {
+    const clamped = Math.max(0, Math.min(GUIDED_SAVE_STEPS.length - 1, index));
+    if (clamped === currentStepIndex) {
+      return;
+    }
+
+    currentStepIndex = clamped;
+    if (clamped > highestSeenStep) {
+      highestSeenStep = clamped;
+      if (!completionDone && highestSeenStep >= GUIDED_SAVE_STEPS.length - 1) {
+        acknowledgeSectionCompletion(sectionId);
+        completionDone = true;
+      }
+    }
     renderGuided();
   };
 
   /**
-   * @param {Event} event
-   * @returns {void}
+   * Resolve active guided zone by viewport anchor position.
+   * @returns {number}
    */
-  const handleClick = (event) => {
-    const target = /** @type {HTMLElement | null} */ (event.target instanceof HTMLElement ? event.target : null);
-    if (!target) {
-      return;
+  const resolveStepFromVisibleZone = () => {
+    if (!mainScroller || scrollZones.length === 0) {
+      return currentStepIndex;
     }
 
-    const actionButton = target.closest('[data-role="guided-step-action"]');
-    if (actionButton instanceof HTMLElement) {
-      advanceStep();
-      return;
+    const panelRect = mainScroller.getBoundingClientRect();
+    const anchor = panelRect.top + panelRect.height * 0.32;
+    for (let index = 0; index < scrollZones.length; index += 1) {
+      const rect = scrollZones[index].getBoundingClientRect();
+      if (rect.top <= anchor && rect.bottom > anchor) {
+        return index;
+      }
     }
 
-    const resetButton = target.closest('[data-role="guided-reset"]');
-    if (resetButton instanceof HTMLElement) {
-      reset();
+    if (anchor < scrollZones[0].getBoundingClientRect().top) {
+      return 0;
     }
+    return scrollZones.length - 1;
   };
 
-  demoEl.addEventListener("click", handleClick);
-  reset();
+  currentStepIndex = 0;
+  highestSeenStep = 0;
+  renderGuided();
+
+  /** @type {import("gsap/ScrollTrigger").ScrollTrigger | null} */
+  let guidedTrigger = null;
+  if (mainScroller && scrollyEl && scrollyCopyEl && typeof ScrollTrigger?.create === "function") {
+    guidedTrigger = ScrollTrigger.create({
+      trigger: scrollyEl,
+      scroller: mainScroller,
+      start: "top top+=88",
+      end: () => {
+        const natural = Math.max(
+          scrollyCopyEl.scrollHeight - mainScroller.clientHeight * 0.52,
+          1,
+        );
+        return `+=${Math.round(natural)}`;
+      },
+      scrub: 1,
+      invalidateOnRefresh: true,
+      onUpdate: () => {
+        const visibleStep = resolveStepFromVisibleZone();
+        setStepByScroll(visibleStep);
+      },
+    });
+  }
 
   demoControllers.set(sectionId, {
-    reset,
+    reset() {
+      if (mainScroller && scrollyEl) {
+        const panelRect = mainScroller.getBoundingClientRect();
+        const scrollyRect = scrollyEl.getBoundingClientRect();
+        const top = mainScroller.scrollTop + (scrollyRect.top - panelRect.top);
+        mainScroller.scrollTo({ top, behavior: "smooth" });
+      }
+      setStepByScroll(0);
+      highestSeenStep = 0;
+    },
     dispose() {
-      demoEl.removeEventListener("click", handleClick);
+      guidedTrigger?.kill();
     },
   });
 }
@@ -2448,12 +2578,21 @@ function mountWorkspacePlaygroundSection(section) {
           </header>
           <div class="playground-pane-body playground-terminal-body" data-role="playground-terminal"></div>
         </section>
+        <section class="playground-pane playground-pane-graph">
+          <header class="playground-pane-header">
+            <p class="playground-pane-title">Commit Graph</p>
+          </header>
+          <div class="playground-pane-body playground-graph-body">
+            <svg class="graph-focus-svg playground-graph-svg" data-role="playground-graph" viewBox="0 0 820 500" preserveAspectRatio="xMidYMin meet" aria-label="Playground commit graph"></svg>
+          </div>
+        </section>
       </div>
     </div>
   `;
 
   const zonesMount = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="playground-zones"]'));
   const terminalMount = /** @type {HTMLElement} */ (demoEl.querySelector('[data-role="playground-terminal"]'));
+  const graphSvg = /** @type {SVGSVGElement} */ (demoEl.querySelector('[data-role="playground-graph"]'));
   const resetButton = /** @type {HTMLButtonElement} */ (demoEl.querySelector('[data-role="playground-reset"]'));
 
   const eventName = `demo:${section.number}:command:submit`;
@@ -2461,6 +2600,10 @@ function mountWorkspacePlaygroundSection(section) {
 
   initZones(zonesMount, { title: "Zone Diagram" });
   renderZones(state, zonesMount);
+  renderGraphFocusedSvg(graphSvg, state, {
+    centerSingle: true,
+    emphasizeConvergence: false,
+  });
 
   const terminal = initTerminal(terminalMount, {
     eventName,
@@ -2508,6 +2651,10 @@ function mountWorkspacePlaygroundSection(section) {
     } else {
       terminal.print(formatSuccess(parsed, result), "success");
     }
+    renderGraphFocusedSvg(graphSvg, state, {
+      centerSingle: true,
+      emphasizeConvergence: false,
+    });
 
     emit(`demo:${section.number}:state:changed`, {
       sectionId: section.id,
@@ -2524,6 +2671,10 @@ function mountWorkspacePlaygroundSection(section) {
     terminal.clear();
     terminal.print("Blank repo. Type anything.", "info");
     renderZones(state, zonesMount);
+    renderGraphFocusedSvg(graphSvg, state, {
+      centerSingle: true,
+      emphasizeConvergence: false,
+    });
   };
 
   resetButton.addEventListener("click", reset);
@@ -2650,6 +2801,16 @@ export function initSections() {
 
   demoControllers.forEach((controller) => controller.dispose());
   demoControllers.clear();
+  mountedSectionIds.clear();
+
+  if (sectionMountObserver) {
+    sectionMountObserver.disconnect();
+    sectionMountObserver = null;
+  }
+  if (sectionSuspendObserver) {
+    sectionSuspendObserver.disconnect();
+    sectionSuspendObserver = null;
+  }
 
   mainContent.innerHTML = "";
   sectionRefs.clear();
@@ -2703,50 +2864,84 @@ export function initSections() {
     });
   }
 
+  const sectionById = new Map(SECTIONS.map((section) => [section.id, section]));
+
+  sectionMountObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting || entry.intersectionRatio <= 0) {
+          return;
+        }
+        const sectionId = entry.target instanceof HTMLElement ? entry.target.getAttribute("data-section") : "";
+        if (!sectionId) {
+          return;
+        }
+        const section = sectionById.get(sectionId);
+        if (!section) {
+          return;
+        }
+        mountSectionDemo(section);
+      });
+    },
+    {
+      root: mainContent,
+      threshold: 0.02,
+      rootMargin: "0px 0px 12% 0px",
+    },
+  );
+
+  sectionSuspendObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting || entry.intersectionRatio > 0) {
+          return;
+        }
+        const sectionId = entry.target instanceof HTMLElement ? entry.target.getAttribute("data-section") : "";
+        if (!sectionId) {
+          return;
+        }
+        suspendSectionDemo(sectionId);
+      });
+    },
+    {
+      root: mainContent,
+      threshold: 0,
+    },
+  );
+
+  sectionRefs.forEach(({ el }) => {
+    sectionMountObserver?.observe(el);
+    sectionSuspendObserver?.observe(el);
+  });
+
+  const panelRect = mainContent.getBoundingClientRect();
   for (const section of SECTIONS) {
-    if (section.layout === "orientation") {
-      mountOrientationSection(section.id);
+    const refs = sectionRefs.get(section.id);
+    if (!refs?.el) {
       continue;
     }
-
-    if (section.layout === "guided-save-workflow") {
-      mountGuidedSaveWorkflow(section.id);
-      continue;
+    const rect = refs.el.getBoundingClientRect();
+    const intersectsViewport = rect.bottom > panelRect.top && rect.top < panelRect.bottom;
+    if (intersectsViewport) {
+      mountSectionDemo(section);
     }
-
-    if (section.layout === "graph-focused") {
-      mountGraphFocusedSection(section);
-      continue;
-    }
-
-    if (section.layout === "split-sync-world") {
-      mountSplitSyncWorldSection(section);
-      continue;
-    }
-
-    if (section.layout === "timeline-undo") {
-      mountTimelineUndoSection(section);
-      continue;
-    }
-
-    if (section.layout === "stash-shelf") {
-      mountStashShelfSection(section);
-      continue;
-    }
-
-    if (section.layout === "workspace-playground") {
-      mountWorkspacePlaygroundSection(section);
-      continue;
-    }
-
-    mountInteractiveSection(section);
   }
 
   return {
     sectionRefs: new Map(sectionRefs),
     resetDemo(sectionId) {
       const controller = demoControllers.get(sectionId);
-      controller?.reset();
+      if (!controller) {
+        return;
+      }
+
+      const previousSpeed = getAnimationSpeedMultiplier();
+      setAnimationSpeedMultiplier(0);
+      try {
+        controller.reset();
+      } finally {
+        setAnimationSpeedMultiplier(previousSpeed);
+      }
     },
   };
 }
@@ -2757,5 +2952,16 @@ export function initSections() {
  * @returns {void}
  */
 export function resetSection(sectionId) {
-  demoControllers.get(sectionId)?.reset();
+  const controller = demoControllers.get(sectionId);
+  if (!controller) {
+    return;
+  }
+
+  const previousSpeed = getAnimationSpeedMultiplier();
+  setAnimationSpeedMultiplier(0);
+  try {
+    controller.reset();
+  } finally {
+    setAnimationSpeedMultiplier(previousSpeed);
+  }
 }

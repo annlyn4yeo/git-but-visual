@@ -57,6 +57,7 @@ function renderSidebarMarkup() {
 
   return `
     <div class="sidebar-shell">
+      <span class="sidebar-active-rail" data-role="sidebar-active-rail" aria-hidden="true"></span>
       <header class="sidebar-logo-block">
         <h1 class="sidebar-logo">
           Git<span class="sidebar-logo-accent"><em>Visual</em></span>
@@ -102,16 +103,28 @@ function scrollToSection(sectionId) {
   mainPanel.scrollTo({ top, behavior: "smooth" });
 }
 
-function setSidebarCollapsedBySection(sectionId) {
-  const app = document.getElementById("app");
-  if (!app) {
+/**
+ * @param {HTMLElement | null} sidebar
+ * @param {HTMLElement | null} targetItem
+ * @returns {void}
+ */
+function moveActiveRail(sidebar, targetItem) {
+  if (!sidebar || !targetItem) {
     return;
   }
 
-  app.classList.toggle(
-    "is-playground-focus",
-    sectionId === PLAYGROUND_ITEM.sectionId,
-  );
+  const shell = sidebar.querySelector(".sidebar-shell");
+  const rail = sidebar.querySelector('[data-role="sidebar-active-rail"]');
+  if (!(shell instanceof HTMLElement) || !(rail instanceof HTMLElement)) {
+    return;
+  }
+
+  const shellRect = shell.getBoundingClientRect();
+  const itemRect = targetItem.getBoundingClientRect();
+  const top = itemRect.top - shellRect.top;
+  rail.style.top = `${Math.max(0, top)}px`;
+  rail.style.height = `${Math.max(0, itemRect.height)}px`;
+  rail.style.opacity = "1";
 }
 
 function readCompletionSet() {
@@ -146,36 +159,6 @@ function applyCompletionState(sidebarEl) {
     );
     itemEl.classList.toggle("is-complete", isComplete);
   });
-}
-
-function getSectionClosestToViewportTop(mainPanel) {
-  const sectionEls = mainPanel.querySelectorAll("[data-section]");
-  if (sectionEls.length === 0) {
-    return null;
-  }
-
-  const panelRect = mainPanel.getBoundingClientRect();
-  const anchor =
-    panelRect.top + Math.min(180, Math.max(120, panelRect.height * 0.22));
-
-  let best = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  sectionEls.forEach((sectionEl) => {
-    const rect = sectionEl.getBoundingClientRect();
-    const inView = rect.bottom > panelRect.top && rect.top < panelRect.bottom;
-    if (!inView) {
-      return;
-    }
-
-    const distance = Math.abs(rect.top - anchor);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = sectionEl;
-    }
-  });
-
-  return best;
 }
 
 /**
@@ -227,44 +210,12 @@ export function initSidebar(containerEl) {
       }
 
       setActiveSection(sectionId);
-      setSidebarCollapsedBySection(sectionId);
       scrollToSection(sectionId);
     });
   });
 
   const initialId = SIDEBAR_SECTIONS[0].items[0].sectionId;
   setActiveSection(initialId);
-  setSidebarCollapsedBySection(initialId);
-
-  const mainPanel = getMainContentPanel();
-  if (mainPanel) {
-    let frame = 0;
-    const syncToScroll = () => {
-      frame = 0;
-      const activeEl = getSectionClosestToViewportTop(mainPanel);
-      if (!activeEl) {
-        return;
-      }
-
-      const sectionId = activeEl.getAttribute("data-section");
-      if (!sectionId) {
-        return;
-      }
-
-      setActiveSection(sectionId);
-      setSidebarCollapsedBySection(sectionId);
-    };
-
-    const onScroll = () => {
-      if (frame) {
-        return;
-      }
-      frame = window.requestAnimationFrame(syncToScroll);
-    };
-
-    mainPanel.addEventListener("scroll", onScroll, { passive: true });
-    syncToScroll();
-  }
 }
 
 /**
@@ -286,4 +237,12 @@ export function setActiveSection(sectionId) {
     itemEl.classList.toggle("is-active", isActive);
     itemEl.setAttribute("aria-current", isActive ? "true" : "false");
   });
+
+  const activeItem = sidebar.querySelector(
+    `[data-role="sidebar-nav-item"][data-section="${sectionId}"]`,
+  );
+  moveActiveRail(
+    sidebar,
+    activeItem instanceof HTMLElement ? activeItem : null,
+  );
 }

@@ -340,10 +340,21 @@
 .orientation-flow {
   display: grid;
   place-items: center;
-  color: rgba(240, 240, 250, 0.3);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xl);
-  text-shadow: 0 0 12px rgba(240, 240, 250, 0.1);
+  width: 38px;
+}
+
+.orientation-flow-svg {
+  width: 100%;
+  height: 14px;
+  overflow: visible;
+}
+
+.orientation-flow-path {
+  fill: none;
+  stroke: rgba(240, 240, 250, 0.34);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .orientation-zone-working {
@@ -413,6 +424,71 @@
 .orientation-zone-remote:focus-within {
   border-color: var(--color-blue);
   box-shadow: 0 18px 40px rgba(77, 159, 255, 0.2), inset 0 0 0 1px rgba(77, 159, 255, 0.45);
+}
+
+.guided-save-scrolly {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.guided-scroll-copy {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: 4vh;
+}
+
+.guided-scroll-zone {
+  min-height: 44vh;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: linear-gradient(145deg, rgba(15, 15, 26, 0.9), rgba(24, 24, 37, 0.82));
+  padding: var(--space-3);
+  display: grid;
+  align-content: center;
+  gap: var(--space-1);
+  opacity: 0.56;
+  transform: scale(0.98);
+  transition:
+    opacity var(--duration-base) ease,
+    transform var(--duration-base) ease,
+    border-color var(--duration-base) ease;
+}
+
+.guided-scroll-zone.is-active {
+  opacity: 1;
+  transform: scale(1);
+  border-color: var(--color-green-border);
+}
+
+.guided-scroll-kicker {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: calc(var(--space-1) / 3);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.guided-scroll-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+}
+
+.guided-scroll-description {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.guided-save-sticky {
+  position: sticky;
+  top: calc(var(--space-5) + var(--space-2));
 }
 
 .guided-save-demo {
@@ -528,8 +604,9 @@
 }
 
 .guided-step-action:disabled {
-  opacity: 0.6;
-  cursor: wait;
+  opacity: 1;
+  cursor: default;
+  pointer-events: none;
 }
 
 .guided-complete-card {
@@ -615,8 +692,8 @@
 
 .guided-save-demo .zones-focus-working-staging [data-zone="localRepository"],
 .guided-save-demo .zones-focus-working-staging [data-zone="remoteRepository"] {
-  opacity: 0.44;
-  transform: scale(0.96);
+  opacity: 0.4;
+  transform: scale(0.955);
   filter: saturate(0.65);
 }
 
@@ -628,8 +705,8 @@
 
 .guided-save-demo .zones-focus-staging-local [data-zone="workingDirectory"],
 .guided-save-demo .zones-focus-staging-local [data-zone="remoteRepository"] {
-  opacity: 0.44;
-  transform: scale(0.96);
+  opacity: 0.4;
+  transform: scale(0.955);
   filter: saturate(0.65);
 }
 
@@ -641,8 +718,8 @@
 
 .guided-save-demo .zones-focus-local-remote [data-zone="workingDirectory"],
 .guided-save-demo .zones-focus-local-remote [data-zone="stagingArea"] {
-  opacity: 0.44;
-  transform: scale(0.96);
+  opacity: 0.4;
+  transform: scale(0.955);
   filter: saturate(0.65);
 }
 
@@ -650,6 +727,21 @@
 .guided-save-demo .zones-focus-local-remote [data-zone="remoteRepository"] {
   opacity: 1;
   transform: scale(1.01);
+}
+
+@media (max-width: 1100px) {
+  .guided-save-scrolly {
+    grid-template-columns: 1fr;
+  }
+
+  .guided-scroll-zone {
+    min-height: 40vh;
+  }
+
+  .guided-save-sticky {
+    position: static;
+    top: auto;
+  }
 }
 
 .graph-focus-demo {
@@ -1486,7 +1578,7 @@
 
 .playground-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(520px, 1.35fr);
+  grid-template-columns: minmax(280px, 0.95fr) minmax(520px, 1.35fr) minmax(300px, 1fr);
   gap: var(--space-3);
   min-height: 600px;
 }
@@ -1566,6 +1658,21 @@
 
 .playground-pane-terminal .terminal-output {
   min-height: 0;
+}
+
+.playground-pane-graph {
+  overflow: hidden;
+}
+
+.playground-graph-body {
+  padding: var(--space-3);
+  min-height: 0;
+}
+
+.playground-graph-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
 }
 
 @keyframes guided-complete-pulse {
